@@ -5,7 +5,7 @@
 # MEM_BUDGET_MEMINFO names the meminfo file (default /proc/meminfo) and MEM_BUDGET_PROCS
 # replaces the process list (one command line per line); both are used by tests.
 set -u
-FLOOR="${MEM_FLOOR_PCT:-30}"      # keep at least this % free
+FLOOR="${MEM_FLOOR_PCT:-20}"      # keep at least this % free
 JOB_MB="${MEM_JOB_MB:-3500}"      # rough peak of one heavy job
 MEMINFO="${MEM_BUDGET_MEMINFO:-/proc/meminfo}"
 PATTERN="vitest|jest|npm ci|npm install|vite( |$)|tsc -b|nx run-many|expo start|metro"
