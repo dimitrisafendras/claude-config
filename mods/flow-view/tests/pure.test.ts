@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -183,4 +183,28 @@ test('a long note in a heading is cut, and the breakdown names the ticket', () =
   expect(drawPhases(day).source).not.toContain('x'.repeat(60))
   const t = demoBoard(10, 0).rows[0]!
   expect(drawTicket(t, []).source).toContain('Login fails after a token refresh')
+})
+
+test('facts reads a merged pull request and a status move, and nothing else', () => {
+  expect(facts('Bash', { command: 'cd repo && gh pr merge 10254 -R org/repo --squash' })).toEqual([{ pr: 10254, state: 'merged' }])
+  expect(facts('Bash', { command: 'gh pr merge https://github.com/org/repo/pull/7 --squash' })).toEqual([{ pr: 7, state: 'merged' }])
+  expect(facts('Bash', { command: 'gh pr view 10254' })).toEqual([])
+  expect(facts('mcp__x__update_task', { task_id: 'abc123', status: 'In Review' })).toEqual([{ ticket: 'abc123', state: 'review' }])
+  expect(facts('mcp__x__update_task', { task_id: 'abc123', status: 'backlog' })).toEqual([])
+  expect(facts('mcp__x__get_task', { task_id: 'abc123', status: 'done' })).toEqual([])
+})
+
+test('applyFact moves the matching row forward and never back', () => {
+  const day = { id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [
+    { id: 'r01', title: 'SN-1 One', url: 'https://app.example.com/t/abc123', state: 'running', prNumber: 7 },
+    { id: 'r02', title: 'SN-2 Two', state: 'verified', prNumber: 8 },
+  ] }
+  const merged = applyFact(day, { pr: 7, state: 'merged' }, 5)
+  expect(merged.rows[0]?.state).toBe('merged')
+  expect(merged.updatedAt).toBe(5)
+  expect(applyFact(merged, { ticket: 'abc123', state: 'review' }, 9)).toBe(merged)
+  expect(applyFact(merged, { ticket: 'abc123', state: 'blocked' }, 9)).toBe(merged)
+  expect(applyFact(day, { ticket: 'SN-1', state: 'blocked' }, 9).rows[0]?.state).toBe('blocked')
+  expect(applyFact(day, { pr: 8, state: 'merged' }, 9)).toBe(day)
+  expect(applyFact(day, { pr: 99, state: 'merged' }, 9)).toBe(day)
 })

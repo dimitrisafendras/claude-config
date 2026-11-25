@@ -975,6 +975,71 @@ async function capture($: EngineInterface, args: Record<string, unknown>): Promi
   await refresh($)
 }
 
+/** One thing that the session did and that changes a ticket: a merged pull request or a status move on the ticket board. */
+export type Fact = { pr: number; state: string } | { ticket: string; state: string }
+
+const BOARD_STATES: Record<string, string> = {
+  'in progress': 'running',
+  blocked: 'blocked',
+  'in review': 'review',
+  'on staging': 'merged',
+  done: 'merged',
+  'in production': 'verified',
+  closed: 'verified',
+}
+
+/** The facts in one finished tool call. The board must not wait for the coordinator to write them. */
+export function facts(tool: string, args: Record<string, unknown>): Fact[] {
+  const out: Fact[] = []
+  if (tool === 'Bash' && typeof args.command === 'string') {
+    for (const m of args.command.matchAll(/\bgh[ \t]+pr[ \t]+merge[ \t]+(?:https?:\/\/\S+\/pull\/)?(\d{1,7})\b/g)) {
+      out.push({ pr: Number(m[1]), state: 'merged' })
+    }
+  }
+  if (/update_task$/.test(tool) && typeof args.task_id === 'string' && typeof args.status === 'string') {
+    const state = BOARD_STATES[args.status.trim().toLowerCase()]
+    if (state !== undefined && /^[A-Za-z0-9-]{3,40}$/.test(args.task_id)) out.push({ ticket: args.task_id, state })
+  }
+
+  return out
+}
+
+const RANK = ['queued', 'running', 'review', 'merged', 'verified']
+
+/** The board with one fact applied. A row never goes back from a later stage because of a fact, and "blocked" does not replace a merged row. */
+export function applyFact(b: Board, f: Fact, at: number): Board {
+  let hit = false
+  const rows = b.rows.map(t => {
+    const isMine = 'pr' in f ? t.prNumber === f.pr : (t.url ?? '').toLowerCase().endsWith('/' + f.ticket.toLowerCase()) || t.title.toUpperCase().startsWith(f.ticket.toUpperCase() + ' ')
+    if (!isMine || t.state === f.state) return t
+    const from = RANK.indexOf(t.state)
+    const to = RANK.indexOf(f.state)
+    if (to === -1 ? from >= RANK.indexOf('merged') : from > to) return t
+    hit = true
+
+    return { ...t, state: f.state }
+  })
+
+  return hit ? { ...b, rows, updatedAt: at } : b
+}
+
+async function observe($: EngineInterface, tool: string, args: Record<string, unknown>): Promise<void> {
+  const found = facts(tool, args)
+  if (found.length === 0) return
+  const at = await $.clock.now()
+  let changed = false
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith('day:') || key === 'day:demo') continue
+    const kept = await safeGet($, key)
+    if (!isBoard(kept)) continue
+    const next = found.reduce((b, f) => applyFact(b, f, at), kept)
+    if (next === kept) continue
+    await $.store.set(key, next)
+    changed = true
+  }
+  if (changed) await refresh($)
+}
+
 export function tone(state: string): { status: FlowNode['status']; hue: string } {
   if (state === 'running') return { status: 'running', hue: HUE.running }
   if (state === 'review') return { status: 'idle', hue: '#c084fc' }
@@ -1307,6 +1372,13 @@ export const register: Register = on => {
           await capture($, args)
         } catch {
           // The plan copy is a view only: a write that it cannot read changes nothing.
+        }
+      }
+      if (!isError) {
+        try {
+          await observe($, e.tool, args)
+        } catch {
+          // A fact that cannot be read changes nothing.
         }
       }
       if (end - lastPublish > 2000) await publish($)
