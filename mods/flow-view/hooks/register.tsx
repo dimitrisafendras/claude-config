@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Board, Call, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
+import type { Board, Call, Decision, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
 
 const PANE = 'flow-view'
 const MAIN = 'main'
@@ -931,7 +931,7 @@ function frame(body: string, tall: number, units = W): Drawing {
 const BLANK: Board = { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 }
 const PHASES = ['housekeeping', 'inbox', 'plan', 'running', 'done']
 const STAGES = ['queued', 'running', 'review', 'merged', 'verified']
-const ROW_TEXT = ['title', 'url', 'source', 'repo', 'surface', 'size', 'model', 'state', 'branch', 'pr', 'ci', 'session', 'note'] as const
+const ROW_TEXT = ['title', 'url', 'source', 'repo', 'surface', 'size', 'model', 'state', 'branch', 'pr', 'ci', 'session', 'note', 'next'] as const
 const WORKER_TEXT = ['name', 'kind', 'title', 'surface', 'model', 'state', 'branch'] as const
 
 function hasId(v: unknown): boolean {
@@ -1018,12 +1018,15 @@ function apply(b: Board, w: Write, at: number): Board {
       needsYou: Array.isArray(d.needsYou)
         ? d.needsYou.filter((x): x is string => typeof x === 'string').map(x => clip(x, 160)).slice(0, 12)
         : base.needsYou,
+      decisions: 'decisions' in d ? toDecisions(d.decisions) : base.decisions,
       updatedAt: at,
     })
   }
   if (parts[2] === 'rows') {
     const old = b.rows.find(t => t.id === w.doc_id)
-    const rows = merge<Ticket>(b.rows, w.doc_id, w.op, w.data, ROW_TEXT, ['n', 'sev', 'prNumber']).map(t => (t.id === w.doc_id ? timed(old, t, at) : t))
+    const rows = merge<Ticket>(b.rows, w.doc_id, w.op, w.data, ROW_TEXT, ['n', 'sev', 'prNumber']).map(t =>
+      t.id === w.doc_id ? timed(old, t.next === undefined ? t : { ...t, next: clip(t.next, MAX_NEXT) }, at) : t,
+    )
 
     return { ...b, rows: rows.slice(-MAX_ROWS), updatedAt: at }
   }
@@ -1032,6 +1035,88 @@ function apply(b: Board, w: Write, at: number): Board {
   }
 
   return b
+}
+
+const MAX_NEXT = 90
+const MAX_DECISIONS = 12
+
+/**
+ * The decisions of a day, from a write of the coordinator: a JSON text or an array. An item that does not have the
+ * form of a decision record is ignored. At most 12 are kept.
+ */
+export function toDecisions(v: unknown): Decision[] {
+  let list: unknown = v
+  if (typeof v === 'string') {
+    try {
+      list = JSON.parse(v)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(list)) return []
+  const out: Decision[] = []
+  for (const item of list) {
+    if (typeof item !== 'object' || item === null) continue
+    const d = item as Record<string, unknown>
+    const options = d.options
+    if (typeof d.id !== 'string' || d.id === '' || d.id.length > 80) continue
+    if (typeof d.question !== 'string' || d.question.trim() === '') continue
+    if (!Array.isArray(options) || options.length !== 2 || !options.every(o => typeof o === 'string' && o.trim() !== '')) continue
+    if (typeof d.default !== 'string' || typeof d.reversible !== 'boolean') continue
+    if (typeof d.deadline !== 'string' || !Number.isFinite(Date.parse(d.deadline))) continue
+    if (d.ticket !== undefined && d.ticket !== null && typeof d.ticket !== 'string') continue
+    const one: Decision = {
+      id: d.id,
+      question: clip(d.question, 200),
+      options: [clip(String(options[0]), 80), clip(String(options[1]), 80)],
+      default: clip(d.default, 80),
+      deadline: d.deadline,
+      reversible: d.reversible,
+    }
+    if (typeof d.ticket === 'string' && d.ticket !== '') one.ticket = clip(d.ticket, 40)
+    out.push(one)
+    if (out.length >= MAX_DECISIONS) break
+  }
+
+  return out
+}
+
+/** The time to a deadline in words: "in 25m", "in 3h", "in 2d", or "overdue". */
+export function deadlineWords(deadline: string, now: number): string {
+  const at = Date.parse(deadline)
+  if (!Number.isFinite(at)) return 'no deadline'
+  const ms = at - now
+  if (ms <= 0) return 'overdue'
+  const m = Math.max(1, Math.round(ms / 60_000))
+  if (m < 60) return `in ${m}m`
+  const h = Math.round(m / 60)
+  if (h < 24) return `in ${h}h`
+
+  return `in ${Math.round(h / 24)}d`
+}
+
+/** The clock time of an ISO time, in the time zone of this computer: "18:00". */
+export function clockOf(deadline: string): string {
+  const at = new Date(Date.parse(deadline))
+  if (!Number.isFinite(at.getTime())) return ''
+
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+}
+
+/** The letter of the default option ("a" or "b"), or the default text when it is not one of the two options. */
+export function defaultMark(d: Decision): string {
+  return d.default === d.options[0] ? 'a' : d.default === d.options[1] ? 'b' : d.default
+}
+
+/** The lines of one decision under its question: the two options, then the default, the deadline and what occurs at the deadline. */
+export function decisionLines(d: Decision, now: number): [string, string] {
+  const words = deadlineWords(d.deadline, now)
+  const by = clockOf(d.deadline)
+
+  return [
+    `a) ${d.options[0]}  b) ${d.options[1]}`,
+    [`default ${defaultMark(d)}`, by === '' ? '' : `by ${by}`, words, d.reversible ? 'default runs at the deadline' : 'waits for you'].filter(Boolean).join(' · '),
+  ]
 }
 
 async function capture($: EngineInterface, args: Record<string, unknown>): Promise<void> {
@@ -1537,7 +1622,8 @@ export function drawPhases(b: Board, time?: TimeFacts): Drawing {
     const x = Math.round(x0 + i * stepX)
     const isLast = i === PHASES.length - 1
     const state = at < 0 ? 'idle' : isLast && isClosedOpen ? 'stopped' : i < at || b.phase === 'done' ? 'completed' : i === at ? 'running' : 'idle'
-    const label = isLast && isClosedOpen ? `closed, ${left} open` : name
+    const open = b.decisions?.length ?? 0
+    const label = (isLast && isClosedOpen ? `closed, ${left} open` : name) + (isLast && open > 0 ? ` · ${plural(open, 'decision')} open` : '')
     // The text under a step is one word, a phase of the day, so two texts do not touch. The last step reads "done", or
     // "closed" when the day ended with tickets that are not done: the number of open tickets is in the tooltip and the ring.
     const short = isLast ? (isYourTurn ? 'needs you' : isClosedOpen ? 'closed' : 'done') : ({ housekeeping: 'setup', running: 'working' } as Record<string, string>)[name] ?? name
@@ -1632,6 +1718,7 @@ export function demoBoard(tick: number, start: number): Board {
       session: d.session,
       prNumber: stage >= 2 ? d.pr : undefined,
       ci: stage >= 3 ? 'green' : stage === 2 ? 'pending' : undefined,
+      next: state === 'running' ? 'Agents: write the fix, then the tests' : state === 'review' ? 'CI watch: merge on green · try 1 of 3' : undefined,
     } as Ticket)
   })
   const laneState = (name: string) => (rows.some(r => r.session === name && r.state === 'running') ? 'running' : tick > 4 ? 'done' : 'idle')
@@ -1649,6 +1736,25 @@ export function demoBoard(tick: number, start: number): Board {
     phase: tick < 2 ? 'inbox' : tick < 4 ? 'plan' : tick < 20 ? 'running' : 'done',
     headline: 'Demo: 4 tickets start now, 1 waits for you, 1 is blocked.',
     needsYou: ['Onboarding text: the new wording needs your OK'],
+    decisions: [
+      {
+        id: 'demo-d1',
+        ticket: 'r05',
+        question: 'Which wording for the onboarding text?',
+        options: ['Keep the short text', 'Use the new long text'],
+        default: 'Keep the short text',
+        deadline: new Date(start + 3 * 3_600_000).toISOString(),
+        reversible: true,
+      },
+      {
+        id: 'demo-d2',
+        question: 'Release the web app to production?',
+        options: ['Release now', 'Wait for tomorrow'],
+        default: 'Wait for tomorrow',
+        deadline: new Date(start + 6 * 3_600_000).toISOString(),
+        reversible: false,
+      },
+    ],
     rows,
     workers: [
       { id: 'lane-web', name: 'lane-web', kind: 'session', title: 'Lane: web-app · web', state: laneState('lane-web') },
@@ -1920,6 +2026,7 @@ export const register: Register = on => {
     const toggleOnce = () => update($, view, w => ({ ...w, once: w.once !== true }))
     // The notes of the coordinator start folded: the ticket cards below give the same facts for each ticket.
     const showNotes = v.notes === true
+    const decisions = day.decisions ?? []
     const toggleNotes = () => update($, view, w => ({ ...w, notes: w.notes !== true }))
     const tint = (status: FlowNode['status']) =>
       status === 'running' ? 'suggestion' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'stopped' ? 'warning' : 'inactive'
@@ -2055,6 +2162,48 @@ export const register: Register = on => {
                 })}
               </Box>
             )}
+            {decisions.length > 0 && (
+              // Read-only: a decision is made in the chat. The card tells what waits and what runs by itself at its deadline.
+              <Box key="decisions" flexDirection="column" borderStyle="round" borderColor="warning" paddingX="md" paddingY="sm" gap="sm">
+                <Text>
+                  <Text bold color="warning">
+                    DECISIONS
+                  </Text>{' '}
+                  <Text dimColor>{decisions.length}</Text>
+                </Text>
+                {decisions.map(d => {
+                  const [choices, when] = decisionLines(d, now)
+
+                  return (
+                    <Box key={`decision-${d.id}`} flexDirection="column">
+                      <Text>
+                        <Text bold color={d.reversible ? 'inactive' : 'warning'}>
+                          {d.reversible ? '○' : '!'}
+                        </Text>{' '}
+                        {d.ticket !== undefined && (
+                          <Text bold color="warning">
+                            {d.ticket}{' '}
+                          </Text>
+                        )}
+                        {d.question}
+                      </Text>
+                      <Text>{'  '}{choices}</Text>
+                      {d.reversible ? (
+                        <Text dimColor>
+                          {'  '}
+                          {when}
+                        </Text>
+                      ) : (
+                        <Text color={deadlineWords(d.deadline, now) === 'overdue' ? 'error' : 'warning'}>
+                          {'  '}
+                          {when}
+                        </Text>
+                      )}
+                    </Box>
+                  )
+                })}
+              </Box>
+            )}
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               {TILES.map(([group, label, hue]) => {
                 const isOn = v.filter === group
@@ -2128,6 +2277,7 @@ export const register: Register = on => {
                               <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{ci}</Text>
                             )}
                           </Box>
+                          {r.next !== undefined && r.next !== '' && <Text dimColor>↻ {clip(r.next, Math.min(MAX_NEXT, inner - 2))}</Text>}
                           {r.note !== undefined && <Text>{clip(r.note, inner * 2)}</Text>}
                           {meta !== '' && <Text dimColor>{clip(meta, inner)}</Text>}
                           {facts !== '' && <Text dimColor>{clip(facts, inner)}</Text>}

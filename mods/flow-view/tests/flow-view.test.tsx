@@ -192,6 +192,48 @@ test('the plan of /start-work shows as tickets, and each card shows its facts wi
   await ui.unmount()
 })
 
+test('a card shows the next action of the loops, and the decisions card shows what waits for you', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  const decisions = [
+    { id: 'd1', ticket: 'SN-12', question: 'Use the new wording?', options: ['Keep the text', 'Use the new text'], default: 'Keep the text', deadline: '2026-11-22T15:00:00Z', reversible: true },
+    { id: 'd2', ticket: null, question: 'Release to production?', options: ['Release now', 'Wait'], default: 'Wait', deadline: '2026-11-22T11:00:00Z', reversible: false },
+    { id: 'bad', question: 'No options' },
+  ]
+  await $.tool.call({
+    tool: 'ArtifactData',
+    action: 'batch',
+    url: 'https://claude.ai/artifact/x',
+    writes: [
+      { op: 'set', collection: 'days', doc_id: '2026-11-22', data: { phase: 'running', needsYou: [], decisions: JSON.stringify(decisions) } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r01', data: { n: 1, title: 'Fix the cart total', state: 'review', next: 'CI watch: fix try 2 of 3 · 6 min' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r02', data: { n: 2, title: 'Add the invoice page', state: 'running', next: 'x'.repeat(200) } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r03', data: { n: 3, title: 'Write the docs', state: 'running' } },
+    ],
+  })
+  await clock.advance(3000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  // The next action is one dim line on the card, with no button. A card with no next action has no line.
+  expect(await ui.find({ type: 'Text', text: /↻ CI watch: fix try 2 of 3 · 6 min/ })).toBeDefined()
+  const long = (await ui.findAll({ type: 'Text', text: /↻ x+/ })).map(one => String(one.text ?? ''))
+  expect(long.length).toBe(1)
+  expect(long[0]!.length).toBeLessThanOrEqual(93)
+  expect((await ui.findAll({ type: 'Text', text: /^↻ / })).length).toBe(2)
+
+  // The decisions card: the count, each question with its two options, the default and what occurs at the deadline.
+  expect(await ui.find({ type: 'Text', text: /DECISIONS 2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /SN-12 Use the new wording\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /a\) Keep the text {2}b\) Use the new text/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /default a · by \d\d:\d\d · in 3h · default runs at the deadline/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /default b · by \d\d:\d\d · overdue · waits for you/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /No options/ })).toBeUndefined()
+  // Read-only: the card adds no button.
+  expect(await ui.find({ key: 'decision-d1' })).toBeDefined()
+  expect(await drawn(ui)).toContain('2 decisions open')
+  await ui.unmount()
+})
+
 test('a count tile for queued tickets, and a toggle for the running sessions', async ($, on) => {
   const clock = world(on)
   await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })

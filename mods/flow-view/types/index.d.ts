@@ -93,6 +93,8 @@ export type Ticket = {
   ci?: string
   session?: string
   note?: string
+  /** What the automatic loops do next on the ticket, up to 90 characters. For example "CI watch: fix try 2 of 3 · 6 min". */
+  next?: string
   /** When the mod first saw work on the ticket, and when it first saw it done. */
   startedAt?: number
   endedAt?: number
@@ -116,6 +118,18 @@ export type Worker = {
   branch?: string
 }
 
+/** A decision that waits for the person. A reversible one takes its default at the deadline; an irreversible one waits. */
+export type Decision = {
+  id: string
+  ticket?: string
+  question: string
+  options: [string, string]
+  default: string
+  /** An ISO time. */
+  deadline: string
+  reversible: boolean
+}
+
 /** One day of /start-work. */
 export type Board = {
   id: string
@@ -124,6 +138,8 @@ export type Board = {
   needsYou: string[]
   rows: Ticket[]
   workers: Worker[]
+  /** The decisions that wait for the person, at most 12. */
+  decisions?: Decision[]
   updatedAt: number
 }
 
