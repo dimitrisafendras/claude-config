@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Board, Call, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
+import type { Board, Call, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
 
 const PANE = 'flow-view'
 const MAIN = 'main'
@@ -25,6 +25,7 @@ const view = atom(
   { tab: 'tickets', filter: 'all', session: '', ticket: '', live: false } as View,
   { shape: 'view-6' },
 )
+const typed = atom({ plugin: 'flow-view', key: 'typed' } as const, [] as Said[], { shape: 'typed-1' })
 const board = atom(
   { plugin: 'flow-view', key: 'board' } as const,
   { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 } as Board,
@@ -1173,6 +1174,68 @@ export function sortTickets(list: Ticket[]): Ticket[] {
   return [...list].sort((a, b) => rank(a) - rank(b) || (a.n ?? 999) - (b.n ?? 999))
 }
 
+
+// ---------- the prompts of the person, counted (pure) ----------
+
+const PROMPTS_KEY = 'prompts'
+const MAX_SAID = 400
+const MAX_SAID_TEXT = 240
+
+/**
+ * What a prompt means, in one key: lower case, one space between words, and a number, a link or a quoted name
+ * replaced by a mark. "Merge PR 12" and "merge pr 13" are the same prompt, and so are two prompts that differ only
+ * in the name of a ticket.
+ */
+export function promptKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '<link>')
+    .replace(/"[^"]*"|`[^`]*`/g, '<name>')
+    .replace(/\b[a-z]{1,6}-\d+\b/g, '<id>')
+    .replace(/#?\d+/g, '<n>')
+    .replace(/[^\p{L}\p{N}<>/ ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300)
+}
+
+/** One more prompt at `at`. The list is the same list with that prompt counted, and the oldest single prompts leave when it is full. */
+export function countPrompt(list: Said[], text: string, at: number): Said[] {
+  const key = promptKey(text)
+  if (key === '') return list
+  const shown = text.trim().replace(/\s+/g, ' ').slice(0, MAX_SAID_TEXT)
+  const i = list.findIndex(s => s.key === key)
+  if (i >= 0) return list.map((s, j) => (j === i ? { ...s, n: s.n + 1, last: at, text: shown } : s))
+  const next = [...list, { key, text: shown, n: 1, first: at, last: at }]
+  if (next.length <= MAX_SAID) return next
+  const drop = next.findIndex(s => s.n === 1)
+
+  return next.filter((_, j) => j !== (drop >= 0 ? drop : 0))
+}
+
+export type PromptReport = { total: number; unique: number; repeated: Said[]; once: Said[]; share: number; since: number }
+
+/** The count of the prompts: the ones said more than once (most often first), the ones said once, and the share that is a repeat. */
+export function reportPrompts(list: Said[]): PromptReport {
+  const total = list.reduce((n, s) => n + s.n, 0)
+  const repeated = list.filter(s => s.n > 1).sort((a, b) => b.n - a.n || b.last - a.last)
+  const once = list.filter(s => s.n === 1).sort((a, b) => b.last - a.last)
+  const extra = repeated.reduce((n, s) => n + s.n - 1, 0)
+
+  return { total, unique: list.length, repeated, once, share: total === 0 ? 0 : Math.round((extra / total) * 100), since: list.reduce((m, s) => (m === 0 || s.first < m ? s.first : m), 0) }
+}
+
+/** The text that asks for a skill for a prompt that came back. It goes in the chat input. */
+export function automateText(s: Said): string {
+  return `I said this ${s.n} times: "${s.text}". Make a skill or a command that does it, and tell me how to start it.`
+}
+
+async function loadPrompts($: EngineInterface): Promise<Said[]> {
+  const kept = await safeGet($, PROMPTS_KEY)
+
+  return Array.isArray(kept) ? (kept as Said[]).filter(s => typeof s?.key === 'string' && typeof s.n === 'number') : []
+}
+
 /** A short mark for the CI of a ticket. */
 // ---------- the ticket list as a report (pure) ----------
 
@@ -1206,24 +1269,6 @@ export function stepOf(state: string): { at?: number; total: number; text: strin
   return { at, total, text: `${'●'.repeat(at)}${'○'.repeat(total - at)} ${state} ${at}/${total}` }
 }
 
-/** The bar of the day in parts, `width` cells in all: each part has the colour of its group, and the queued part is empty. */
-export type BarPart = { key: string; hue: string; text: string }
-export function progressParts(rows: Ticket[], width = 20): BarPart[] {
-  const total = rows.length
-  if (total === 0) return []
-  let seen = 0
-
-  return phaseParts(rows)
-    .map(p => {
-      const start = Math.round((seen / total) * width)
-      seen += p.n
-      const cells = Math.round((seen / total) * width) - start
-
-      return { key: p.key, hue: p.hue, text: (p.key === 'queued' ? '░' : '█').repeat(cells) }
-    })
-    .filter(p => p.text !== '')
-}
-
 /** The colour of each step on the way. A step keeps its colour when it is done, so a line of steps is not one colour. */
 const STAGE_HUE = ['#c9d1d9', HUE.running, REVIEW_HUE, '#60a5fa', HUE.completed]
 
@@ -1239,6 +1284,29 @@ export function stepParts(state: string): StepPart[] {
 
     return { name, mark: isDone ? '✓' : isNow ? '◉' : '○', hue: isDone || isNow ? (STAGE_HUE[i] ?? DIM) : DIM, isNow }
   })
+}
+
+/** The track of a ticket as a small drawing: one dot for each step, a line between them, the current dot glows. */
+export function drawTrack(state: string): Drawing | undefined {
+  const parts = stepParts(state)
+  if (parts.length === 0) return undefined
+  const gap = 34
+  let svg = ''
+  parts.forEach((p, i) => {
+    const x = 10 + i * gap
+    const isDone = p.mark === '✓'
+    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${isDone || p.isNow ? p.hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
+    svg +=
+      `<g><title>${esc(p.name)}</title>` +
+      (p.isNow
+        ? `<circle cx="${x}" cy="10" r="7" fill="${p.hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
+        : isDone
+          ? `<circle cx="${x}" cy="10" r="6" fill="${p.hue}"/>`
+          : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
+      `</g>`
+  })
+
+  return frame(svg, 20, 10 + (parts.length - 1) * gap + 10)
 }
 
 /** The steps of one ticket in a line: done, current, to do. A ticket that is off the way shows why. */
@@ -1477,14 +1545,14 @@ export function demoBoard(tick: number, start: number): Board {
 
 // ---------- the /flow command ----------
 
-export const FLOW_HELP = 'Use /flow [tickets | sessions | status | clear | demo | help].'
+export const FLOW_HELP = 'Use /flow [tickets | sessions | prompts | status | clear | demo | help].'
 
 async function flowCommand($: EngineInterface, raw: string): Promise<string> {
   const arg = raw.trim().toLowerCase()
   if (arg === '') return 'Workflow pane opened.'
   if (arg === 'demo') return toggleDemo($)
-  if (arg === 'tickets' || arg === 'sessions') {
-    const tab: View['tab'] = arg === 'tickets' ? 'tickets' : 'sessions'
+  if (arg === 'tickets' || arg === 'sessions' || arg === 'prompts') {
+    const tab: View['tab'] = arg
     await update($, view, w => ({ ...w, tab }))
 
     return `Workflow pane shows ${arg}.`
@@ -1524,10 +1592,12 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'flow',
-      description: 'Show the runs, steps and agents in a live pane. tickets | sessions | status | clear | demo | help',
-      argumentHint: 'tickets | sessions | status | clear | demo | help',
+      description: 'Show the runs, steps and agents in a live pane. tickets | sessions | prompts | status | clear | demo | help',
+      argumentHint: 'tickets | sessions | prompts | status | clear | demo | help',
     })
     void $.ui.open({ id: PANE, title: 'Workflow' })
+    await update($, typed, () => [])
+    void loadPrompts($).then(list => update($, typed, () => list))
     $.clock.every(3000, () => refresh($))
     void refresh($)
 
@@ -1600,6 +1670,9 @@ export const register: Register = on => {
         const before = (await read($, flow)).me?.mineMs ?? 0
         const after = await update($, flow, f => ({ ...f, me: said(f.me, at) }))
         await shareWithTickets($, (after.me?.mineMs ?? 0) - before, at)
+        const counted = countPrompt(await loadPrompts($), e.text, at)
+        await $.store.set(PROMPTS_KEY, counted)
+        await update($, typed, () => counted)
       }
     } catch {
       // The time count is a view only: a prompt always goes through.
@@ -1702,6 +1775,8 @@ export const register: Register = on => {
     const tab = (name: View['tab']) => () => update($, view, w => ({ ...w, tab: name }))
     // The done group starts folded: the person looks at the open work first.
     const closed = v.closed ?? ['done']
+    const columns = e.props.bodyColumns ?? 80
+    const cardWidth = columns >= 90 ? Math.floor((columns - 1) / 2) : columns
     const fold = (group: string) => () =>
       update($, view, w => {
         const now = w.closed ?? ['done']
@@ -1709,7 +1784,6 @@ export const register: Register = on => {
         return { ...w, closed: now.includes(group) ? now.filter(g => g !== group) : [...now, group] }
       })
     const foldAll = (groups: string[]) => () => update($, view, w => ({ ...w, closed: (w.closed ?? ['done']).length > 0 ? [] : groups }))
-    const showSteps = () => update($, view, w => ({ ...w, steps: w.steps !== true }))
     const openTicket = (id: string) => () => update($, view, w => ({ ...w, ticket: w.ticket === id ? '' : id }))
     const toChat = (r: Ticket, a: (typeof ACTIONS)[number]) => async () => {
       const filled = await $.prompt.fill({ text: a.text(ticketRef(r)), mode: a.mode })
@@ -1717,6 +1791,13 @@ export const register: Register = on => {
     }
     const openSession = (id: string) => () => update($, view, w => ({ ...w, session: w.session === id ? '' : id }))
     const time = timeFacts(await read($, flow), now)
+    const report = reportPrompts(await read($, typed))
+    const toChatText = (text: string) => async () => {
+      const filled = await $.prompt.fill({ text, mode: 'replace' })
+      if (!filled.isFilled) await $.ui.toast('The chat input cannot take the text now. Close the open dialog, then try again.')
+    }
+    const showOnce = v.once === true
+    const toggleOnce = () => update($, view, w => ({ ...w, once: w.once !== true }))
     const tint = (status: FlowNode['status']) =>
       status === 'running' ? 'suggestion' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'stopped' ? 'warning' : 'inactive'
 
@@ -1729,17 +1810,76 @@ export const register: Register = on => {
           <Button key="tab-sessions" variant={v.tab === 'sessions' ? 'primary' : 'secondary'} onPress={tab('sessions')}>
             Sessions {live > 0 ? `${live} run` : everyone.length > 0 ? everyone.length : ''}
           </Button>
+          <Button key="tab-prompts" variant={v.tab === 'prompts' ? 'primary' : 'secondary'} onPress={tab('prompts')}>
+            My prompts {report.repeated.length > 0 ? `${report.repeated.length} repeat` : report.total > 0 ? report.total : ''}
+          </Button>
           <Button key="demo" plain dimColor onPress={() => toggleDemo($)}>
             {isDemo ? 'Stop demo' : 'Demo'}
           </Button>
         </Box>
 
         {time !== undefined && (
-          <Box key="time" flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
-            <Text bold>Time of this session</Text>
+          <Box key="time" flexDirection="row" gap={2} flexWrap="wrap" borderStyle="round" borderColor="subtle" paddingX={1}>
+            <Text bold>⏱</Text>
             <Text>{timeLines(time)[0]}</Text>
             <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
-            <Text dimColor>Estimate: each message of yours counts the wait before it, from 30s to 5m.</Text>
+          </Box>
+        )}
+
+        {v.tab === 'prompts' && (
+          <Box flexDirection="column" gap={1}>
+            {report.total === 0 ? (
+              <Text dimColor>Nothing counted yet. Each prompt that you type is counted and kept on this computer.</Text>
+            ) : (
+              <Box flexDirection="row" gap={1} flexWrap="wrap">
+                {[
+                  [report.total, 'prompts', HUE.running],
+                  [report.unique, 'different', HUE.completed],
+                  [`${report.share}%`, 'repeat', report.share >= 30 ? HUE.stopped : HUE.completed],
+                ].map(([n, label, hue]) => (
+                  <Box borderStyle="round" borderColor={String(hue)} paddingX={1}>
+                    <Text bold color={String(hue)}>
+                      {n}
+                    </Text>{' '}
+                    <Text dimColor>{label}</Text>
+                  </Box>
+                ))}
+              </Box>
+            )}
+            {report.repeated.map(sa => {
+              const top = report.repeated[0]?.n ?? 1
+              const hue = sa.n >= 3 ? HUE.stopped : HUE.running
+
+              return (
+                <Box flexDirection="row" gap={1} flexWrap="wrap">
+                  <Text color={hue}>{'█'.repeat(Math.max(1, Math.round((sa.n / top) * 10)))}</Text>
+                  <Text bold color={hue}>
+                    {sa.n}x
+                  </Text>
+                  <Text>{clip(sa.text, 60)}</Text>
+                  <Button key={`auto-${sa.key}`} variant="secondary" onPress={toChatText(automateText(sa))}>
+                    ⚙ Skill
+                  </Button>
+                  <Button key={`again-${sa.key}`} variant="secondary" onPress={toChatText(sa.text)}>
+                    ＋
+                  </Button>
+                </Box>
+              )
+            })}
+            {report.once.length > 0 && (
+              <Button key="once" plain onPress={toggleOnce}>
+                <Text bold color={DIM}>
+                  {showOnce ? '▾' : '▸'} ○ Once
+                </Text>{' '}
+                <Text dimColor>{report.once.length}</Text>
+              </Button>
+            )}
+            {showOnce &&
+              report.once.map(sa => (
+                <Text dimColor>
+                  {'  '}○ {clip(sa.text, 80)}
+                </Text>
+              ))}
           </Box>
         )}
 
@@ -1754,7 +1894,6 @@ export const register: Register = on => {
                 Plan {day.id} · {day.phase}
               </Text>
             )}
-            <Text dimColor>Plan updated {ago(now - day.updatedAt)}</Text>
             {day.needsYou.slice(0, 3).map(line => (
               <Text color="warning">! {clip(line, 90)}</Text>
             ))}
@@ -1778,161 +1917,87 @@ export const register: Register = on => {
               </Button>
             )}
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
-            {rows.length > 0 && (
-              <Box flexDirection="row" gap={1} flexWrap="wrap">
-                <Button key="fold-all" variant="secondary" onPress={foldAll(groupTickets(rows).map(g => g.group))}>
-                  {closed.length > 0 ? '▸ Expand all groups' : '▾ Collapse all groups'}
-                </Button>
-                <Button key="steps" variant={v.steps === true ? 'primary' : 'secondary'} onPress={showSteps}>
-                  {v.steps === true ? 'Hide the steps' : 'Show the steps of each ticket'}
-                </Button>
-              </Box>
-            )}
-            {rows.length > 0 && (
-              <Text dimColor>▸ opens and ▾ closes: press a group name or a ticket. The buttons of a ticket put a text in the chat input and do not send it.</Text>
-            )}
-            {v.filter === 'all' && sorted.length > 0 && (
-              <Text key="progress" bold>
-                {progressParts(sorted).map(p => (
-                  <Text color={p.hue}>{p.text}</Text>
-                ))}{' '}
-                <Text color={count('done') === sorted.length ? HUE.completed : undefined}>
-                  {count('done')} of {sorted.length} done ({Math.round((count('done') / sorted.length) * 100)}%)
-                </Text>
-              </Text>
-            )}
-            {rows.length > 0 && (
-              <Text dimColor>
-                Steps:{' '}
-                {stepParts('verified').map((p, i) => (
-                  <Text color={p.hue}>
-                    {i > 0 ? ' → ' : ''}● {p.name}
-                  </Text>
-                ))}{' '}
-                · <Text dimColor>○</Text> to do
-              </Text>
-            )}
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column">
                 <Button key={`fold-${g.group}`} plain onPress={fold(g.group)}>
                   <Text bold color={g.hue}>
-                    {closed.includes(g.group) ? '▸' : '▾'} ▌ {g.label} · {g.rows.length}
-                  </Text>
-                  <Text dimColor>{closed.includes(g.group) ? '   press to show' : '   press to hide'}</Text>
+                    {closed.includes(g.group) ? '▸' : '▾'} {g.mark} {g.label}
+                  </Text>{' '}
+                  <Text dimColor>{g.rows.length}</Text>
                 </Button>
-                {!closed.includes(g.group) && g.rows.map(r => {
-                  const isOpen = v.ticket === r.id
-                  const facts = ticketFacts(r)
-                  const step = stepOf(r.state)
-                  const isDone = g.group === 'done'
-                  const isBad = r.state === 'failed' || r.state === 'blocked'
-                  const hue = isBad ? HUE.failed : g.hue
-                  const ci = ciMark(r)
-                  const time = ticketTime(r, now)
-                  const isActive = g.group === 'needs' || g.group === 'running' || g.group === 'review'
-                  const hasDetail = isOpen || isActive || v.steps === true
-                  const steps = stepParts(r.state)
+                {!closed.includes(g.group) && (
+                  <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                    {g.rows.map(r => {
+                      const isOpen = v.ticket === r.id
+                      const isActive = g.group === 'needs' || g.group === 'running' || g.group === 'review'
+                      const isDone = g.group === 'done'
+                      const isBad = r.state === 'failed' || r.state === 'blocked'
+                      const hue = isBad ? HUE.failed : g.hue
+                      const step = stepOf(r.state)
+                      const track = drawTrack(r.state)
+                      const ci = ciMark(r)
+                      const time = ticketTime(r, now)
+                      const facts = ticketFacts(r)
 
-                  return (
-                    <Box
-                      flexDirection="column"
-                      borderStyle={isActive || isOpen ? 'round' : undefined}
-                      borderColor={isOpen ? hue : 'subtle'}
-                      paddingX={isActive || isOpen ? 1 : 0}
-                    >
-                      <Button key={`ticket-${r.id}`} plain onPress={openTicket(r.id)}>
-                        <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                        <Text bold color={hue}>
-                          {isBad ? '✗' : g.mark}
-                        </Text>{' '}
-                        <Text dimColor>{r.n !== undefined ? `#${r.n} ` : ''}</Text>
-                        <Text bold={!isDone} dimColor={isDone}>
-                          {clip(r.title, 44)}
-                        </Text>{' '}
-                        {steps.length === 0 ? (
-                          <Text bold color={hue}>
-                            {step.text}
-                          </Text>
-                        ) : (
-                          <Text>
-                            {steps.map(p => (
-                              <Text color={p.hue}>{p.mark === '○' ? '○' : '●'}</Text>
-                            ))}
-                            <Text color={hue}>{` ${r.state} ${step.at}/${step.total}`}</Text>
-                          </Text>
-                        )}
-                        {r.prNumber !== undefined ? <Text dimColor>{` · PR #${r.prNumber}`}</Text> : null}
-                        {ci !== '' ? (
-                          <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{` · ${ci}`}</Text>
-                        ) : null}
-                      </Button>
-                      {hasDetail && steps.length === 0 && (
-                        <Text color={hue}>
-                          {'   '}
-                          {stepList(r.state)}
-                        </Text>
-                      )}
-                      {hasDetail && steps.length > 0 && (
-                        <Text>
-                          {'   '}
-                          {steps.map((p, i) => (
-                            <Text bold={p.isNow} color={p.hue}>
-                              {i > 0 ? '  →  ' : ''}
-                              {p.mark} {p.name}
+                      return (
+                        <Box
+                          flexDirection="column"
+                          width={cardWidth}
+                          borderStyle="round"
+                          borderColor={isOpen || isActive ? hue : 'subtle'}
+                          paddingX={1}
+                        >
+                          <Button key={`ticket-${r.id}`} plain onPress={openTicket(r.id)}>
+                            <Text bold color={hue}>
+                              {isBad ? '✗' : g.mark}
+                            </Text>{' '}
+                            <Text dimColor>{r.n !== undefined ? `#${r.n} ` : ''}</Text>
+                            <Text bold={!isDone} dimColor={isDone}>
+                              {clip(r.title, Math.max(16, cardWidth - 12))}
                             </Text>
-                          ))}
-                        </Text>
-                      )}
-                      {isActive && r.note !== undefined && (
-                        <Text color="warning">
-                          {'   '}Why: {clip(r.note, 100)}
-                        </Text>
-                      )}
-                      {(isOpen || isActive) && (
-                        <Box flexDirection="row" gap={1} flexWrap="wrap">
-                          <Text dimColor>{'  '}</Text>
-                          <Button key={`more-${r.id}`} variant={isOpen ? 'primary' : 'secondary'} onPress={openTicket(r.id)}>
-                            {isOpen ? '▾ Hide details' : '▸ Details'}
                           </Button>
-                          <Text dimColor>To the chat input:</Text>
-                          {ACTIONS.map(a => (
-                            <Button key={`act-${a.key}-${r.id}`} variant="secondary" onPress={toChat(r, a)}>
-                              {a.label}
-                            </Button>
-                          ))}
-                          {r.url !== undefined && /^https?:\/\//.test(r.url) && (
-                            <Link href={r.url} label="↗ Open in the browser" />
+                          <Box flexDirection="row" gap={1} flexWrap="wrap">
+                            {track !== undefined && 'Svg' in t ? (
+                              <t.Svg source={track.source} width={Math.round(track.units * SCALE)} alt={`${r.state} ${step.at} of ${step.total}`} />
+                            ) : (
+                              <Text bold color={hue}>
+                                {step.at === undefined ? stepList(r.state) : step.text}
+                              </Text>
+                            )}
+                            {step.at !== undefined && (
+                              <Text color={hue}>
+                                {r.state} {step.at}/{step.total}
+                              </Text>
+                            )}
+                            {r.prNumber !== undefined && <Text dimColor>PR #{r.prNumber}</Text>}
+                            {ci !== '' && (
+                              <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{ci}</Text>
+                            )}
+                          </Box>
+                          {isActive && r.note !== undefined && !isOpen && <Text color="warning">{clip(r.note, Math.max(20, cardWidth - 4))}</Text>}
+                          {(isOpen || isActive) && (
+                            <Box flexDirection="row" gap={1} flexWrap="wrap">
+                              {ACTIONS.map(a => (
+                                <Button key={`act-${a.key}-${r.id}`} variant="secondary" onPress={toChat(r, a)}>
+                                  {a.label}
+                                </Button>
+                              ))}
+                              {r.url !== undefined && /^https?:\/\//.test(r.url) && <Link href={r.url} label="↗" />}
+                            </Box>
+                          )}
+                          {isOpen && (
+                            <Box flexDirection="column">
+                              <Text dimColor>{time !== '' ? `⏱ ${time}` : '⏱ not measured'}</Text>
+                              {facts !== '' && <Text dimColor>{facts}</Text>}
+                              {r.note !== undefined && <Text color="warning">{clip(r.note, 100)}</Text>}
+                              {'Svg' in t && <t.Svg source={drawTicket(r, day.workers).source} width={width} alt={`Ticket ${r.title}: ${r.state}.`} />}
+                            </Box>
                           )}
                         </Box>
-                      )}
-                      {hasDetail && (
-                        <Text dimColor>
-                          {'   '}
-                          {time !== '' ? `Time: ${time}` : 'Time: not measured'}
-                        </Text>
-                      )}
-                      {isOpen && facts !== '' && (
-                        <Text dimColor>
-                          {'   '}
-                          {facts}
-                        </Text>
-                      )}
-                      {isOpen && !isActive && r.note !== undefined && (
-                        <Text color="warning">
-                          {'   '}Why: {clip(r.note, 100)}
-                        </Text>
-                      )}
-                      {isOpen && r.url !== undefined && (
-                        <Text dimColor>
-                          {'   '}Link: {clip(r.url, 100)}
-                        </Text>
-                      )}
-                      {isOpen && 'Svg' in t && (
-                        <t.Svg source={drawTicket(r, day.workers).source} width={width} alt={`Ticket ${r.title}: ${r.state}.`} />
-                      )}
-                    </Box>
-                  )
-                })}
+                      )
+                    })}
+                  </Box>
+                )}
               </Box>
             ))}
           </Box>
