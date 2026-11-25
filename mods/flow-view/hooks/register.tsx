@@ -1307,12 +1307,13 @@ export function stoppedAt(t: Pick<Ticket, 'prNumber' | 'pr' | 'branch' | 'sessio
  */
 export function drawTrack(state: string, hue: string = HUE.running, stop = 1): Drawing {
   const parts = stepParts(state, hue)
-  const gap = 34
-  const wide = 10 + (STAGES.length - 1) * gap + 10
+  // Wide steps and a name under each point: a reader sees what the steps are without a hover.
+  const gap = 50
+  const wide = 26 + (STAGES.length - 1) * gap + 26
   const why = state === 'needs-you' ? 'waits for you' : state
   let svg = ''
   STAGES.forEach((name, i) => {
-    const x = 10 + i * gap
+    const x = 26 + i * gap
     const part = parts[i]
     const isOff = parts.length === 0
     const isStop = isOff && i + 1 === stop
@@ -1332,10 +1333,12 @@ export function drawTrack(state: string, hue: string = HUE.running, stop = 1): D
           : isDone
             ? `<circle cx="${x}" cy="10" r="6" fill="${hue}"/>`
             : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
+      // The name of the step: the one that the ticket is at is bold and in the colour of the card.
+      `<text x="${x}" y="31" text-anchor="middle" style="font-size:9px;font-weight:${isNow || isStop ? 800 : 500};fill:${isNow || isStop ? hue : isDone ? INK : DIM}">${esc(name)}</text>` +
       `</g>`
   })
 
-  return frame(svg, 20, wide)
+  return frame(svg, 36, wide)
 }
 
 /** The steps of one ticket in a line: done, current, to do. A ticket that is off the way shows why. */
@@ -1411,6 +1414,17 @@ export function ciMark(t: Ticket): string {
   if (t.ci === 'pending') return '… CI'
 
   return ''
+}
+
+/**
+ * A note of the coordinator in two parts: the reference at its start (a ticket, a PR or a short name before the first
+ * colon, such as "SN-258" or "PR #10189") and the rest. A note with no short reference has none.
+ */
+export function splitNote(line: string): { ref: string; rest: string } {
+  const m = /^((?:PR #\d+|[A-Z]{2,5}-\d+(?:(?: and | & |, )[A-Z]{2,5}-\d+)*)[^:]{0,40}):\s+(.*)$/s.exec(line.trim())
+  if (m === null || (m[1] as string).length > 48) return { ref: '', rest: line.trim() }
+
+  return { ref: `${m[1]}:`, rest: m[2] as string }
 }
 
 /** A value that says something: not empty and not a placeholder dash. */
@@ -2014,23 +2028,48 @@ export const register: Register = on => {
                 </Text>
               </Button>
             )}
-            {showNotes && day.headline !== undefined && <Text dimColor>{clip(day.headline, 160)}</Text>}
-            {showNotes && day.needsYou.map(line => <Text color="warning">! {clip(line, 120)}</Text>)}
+            {showNotes && (day.headline !== undefined || day.needsYou.length > 0) && (
+              <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX="md" paddingY="sm" gap="sm">
+                {day.headline !== undefined && <Text dimColor>{clip(day.headline, 400)}</Text>}
+                {day.needsYou.map(line => {
+                  const { ref, rest } = splitNote(line)
+
+                  return (
+                    <Box flexDirection="row" gap="sm">
+                      <Text bold color="warning">
+                        !
+                      </Text>
+                      <Text>
+                        {ref !== '' && (
+                          <Text bold color="warning">
+                            {ref}{' '}
+                          </Text>
+                        )}
+                        {clip(rest, 400)}
+                      </Text>
+                    </Box>
+                  )
+                })}
+              </Box>
+            )}
             <Box flexDirection="row" gap={1} flexWrap="wrap">
-              {TILES.map(([group, label, hue]) => (
-                <Box borderStyle="round" borderColor={count(group) > 0 && (v.filter === group || v.filter === 'all') ? hue : 'subtle'} paddingX={1}>
-                  <Button key={`filter-${group}`} plain dimColor={v.filter !== 'all' && v.filter !== group} onPress={only(group)}>
-                    <Text bold color={count(group) > 0 ? hue : 'inactive'}>
+              {TILES.map(([group, label, hue]) => {
+                const isOn = v.filter === group
+                const dim = v.filter !== 'all' && !isOn
+                // One real button for each tile: no box around a button, so the hover ring is not a second border.
+                return (
+                  <Button key={`filter-${group}`} variant={isOn ? 'primary' : 'secondary'} onPress={only(group)}>
+                    <Text bold color={count(group) > 0 && !dim ? hue : 'inactive'}>
                       {count(group)}
                     </Text>{' '}
                     {label}
                   </Button>
-                </Box>
-              ))}
+                )
+              })}
             </Box>
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
             {groupTickets(rows).map(g => (
-              <Box key={`group-${g.group}`} flexDirection="column">
+              <Box key={`group-${g.group}`} flexDirection="column" gap="sm">
                 {/* A real button, not plain text: the whole pill is the click area. */}
                 <Button key={`fold-${g.group}`} variant="secondary" onPress={fold(g.group)}>
                   <Text bold color={g.hue}>
@@ -2039,7 +2078,7 @@ export const register: Register = on => {
                   <Text dimColor>{g.rows.length}</Text>
                 </Button>
                 {!closed.includes(g.group) && (
-                  <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                  <Box flexDirection="row" flexWrap="wrap" gap="md">
                     {g.rows.map(r => {
                       // One form for each card, in each group: title, track, note, facts, actions. A card does not open
                       // or fold. Its colour is the colour of its group, or red for a blocked or failed ticket.
@@ -2055,7 +2094,7 @@ export const register: Register = on => {
                       const inner = Math.max(20, cardWidth - 4)
 
                       return (
-                        <Box flexDirection="column" width={cardWidth} borderStyle="round" borderColor={hue} paddingX={1}>
+                        <Box flexDirection="column" width={cardWidth} borderStyle="round" borderColor={hue} paddingX="md" paddingY="sm" gap="sm">
                           {/* A press on the title puts the name of the ticket in the chat input. The card does not open or fold. */}
                           <Button key={`ticket-${r.id}`} plain onPress={toChat(r, ACTIONS[0]!)}>
                             <Text bold color={hue}>
@@ -2069,6 +2108,7 @@ export const register: Register = on => {
                               <t.Svg
                                 source={track.source}
                                 width={Math.round(track.units * SCALE)}
+                                height={Math.round(track.tall * SCALE)}
                                 isInteractive
                                 alt={step.at === undefined ? `${r.state}, stopped at step ${stoppedAt(r)} of ${step.total}` : `${r.state} ${step.at} of ${step.total}`}
                               />

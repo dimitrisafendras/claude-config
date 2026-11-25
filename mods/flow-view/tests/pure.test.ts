@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawOverview, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawOverview, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -448,4 +448,12 @@ test('drawOverview draws one arc for each group and gives the share that is done
   expect(drawing.source).toContain('2 of 4 done')
   expect(drawing.source.match(/stroke-dasharray/g)).toHaveLength(3)
   expect(drawOverview([]).source).toContain('0%')
+})
+
+test('a note of the coordinator splits into its reference and the rest', () => {
+  expect(splitNote('SN-258: only a staging data job is left')).toEqual({ ref: 'SN-258:', rest: 'only a staging data job is left' })
+  expect(splitNote('SN-1836 and SN-1837: Legal must confirm')).toEqual({ ref: 'SN-1836 and SN-1837:', rest: 'Legal must confirm' })
+  expect(splitNote('PR #10189 (agents in chat, draft): needs the owner')).toEqual({ ref: 'PR #10189 (agents in chat, draft):', rest: 'needs the owner' })
+  expect(splitNote('CI cost: self-hosted runners')).toEqual({ ref: '', rest: 'CI cost: self-hosted runners' })
+  expect(splitNote('  plain note  ')).toEqual({ ref: '', rest: 'plain note' })
 })
