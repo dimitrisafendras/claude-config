@@ -141,6 +141,8 @@ export type View = {
   closed?: string[]
   /** The Prompts tab shows the prompts that were said once. */
   once?: boolean
+  /** The Today tab shows the notes of the coordinator. */
+  notes?: boolean
 }
 
 declare module 'claude-code' {

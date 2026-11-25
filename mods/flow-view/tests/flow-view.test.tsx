@@ -171,7 +171,13 @@ test('the plan of /start-work shows as tickets, and a press opens the breakdown'
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await drawn(ui)).toContain('2026-11-22')
+  // The notes start folded: one line gives their count, and a press shows them with the summary of the day.
+  expect((await ui.find({ key: 'notes' }))?.text).toMatch(/1 note for you/)
+  expect(await ui.find({ type: 'Text', text: /Sign in to the board/ })).toBeUndefined()
+  await ui.press({ key: 'notes' })
   expect(await ui.find({ type: 'Text', text: /Sign in to the board/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Two rows today/ })).toBeDefined()
+  await ui.press({ key: 'notes' })
   expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page/)
   expect(await ui.find({ type: 'Text', text: /review 3\/5/ })).toBeDefined()
 
