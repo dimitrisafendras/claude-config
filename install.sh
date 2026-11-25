@@ -102,6 +102,12 @@ if [ "$MODE" = check ]; then
     [ -n "$p" ] && say "plugin on locally, not in repo settings: $p"
   done < <(jq -r --slurpfile r "$S" '(.enabledPlugins // {}) | to_entries[] | select(.value) | .key
     | select((endswith("@claude-config") or contains("@claude-config-")) | not) | . as $k | select(($r[0].enabledPlugins // {}) | has($k) | not)' "$L")
+  # A second theme mod fights with custom-themes: both set the theme, and the last set wins, at each prompt too.
+  if jq -e '.enabledPlugins["custom-themes@claude-config"] == true' "$L" >/dev/null 2>&1; then
+    while read -r p; do
+      [ -n "$p" ] && say "theme conflict: $p also sets the theme, so the theme flips; turn it off: claude plugin disable $p"
+    done < <(jq -r '(.enabledPlugins // {}) | to_entries[] | select(.value) | .key | select(test("^(theme-examples|christmas-night|pixel-blue)@"))' "$L")
+  fi
   # The links into the repo.
   while IFS=$'\t' read -r src dst; do
     [ "$(readlink "$dst" 2>/dev/null)" = "$src" ] || say "link: $dst does not point to $src"

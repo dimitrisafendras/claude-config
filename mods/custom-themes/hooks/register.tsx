@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ThemeSetArgs } from 'claude-code'
 
-import { THEMES, themeOf } from './themes'
+import { THEMES, retakeBudget, themeOf } from './themes'
 import type { Theme } from './themes'
 import type { Choice } from '../types'
 
@@ -33,16 +33,27 @@ async function refresh($: $): Promise<void> {
   }
 }
 
+// The theme calls of this mod are counted, so the hooks below tell them from the calls of another mod.
+let ownCalls = 0
+async function own<T>(fn: () => Promise<T>): Promise<T> {
+  ownCalls += 1
+  try {
+    return await fn()
+  } finally {
+    ownCalls -= 1
+  }
+}
+
 /** Sets a theme's look and says in one line what happened. A build that refuses the style keeps the colors and the scene. */
 async function setLook($: $, theme: Theme): Promise<string> {
   const say = (set: { isDrawn: boolean; reason?: string }, note = '') =>
     set.isDrawn ? `${theme.title} is set.${note}` : `${theme.title} is set, but this window draws no theme: ${set.reason ?? 'unknown'}`
   try {
-    return say(await $.theme.set(theme.look))
+    return say(await own(() => $.theme.set(theme.look)))
   } catch (err) {
     const { style: _style, ...without }: ThemeSetArgs = theme.look
     try {
-      return say(await $.theme.set(without), ` The app refused the message style: ${message(err)}`)
+      return say(await own(() => $.theme.set(without)), ` The app refused the message style: ${message(err)}`)
     } catch (again) {
       return `The app refused ${theme.title}: ${message(again)}`
     }
@@ -55,7 +66,7 @@ async function apply($: $, theme: Theme | undefined, forAll: boolean): Promise<s
     if (forAll) await $.store.set(STORE_KEY, 'none')
     const scope: Choice['scope'] = forAll ? undefined : 'session'
     await update($, choice, was => ({ ...was, applied: undefined, scope, preview: undefined }))
-    await $.theme.clear()
+    await own(() => $.theme.clear())
     return 'No theme.'
   }
   if (forAll) await $.store.set(STORE_KEY, theme.id)
@@ -78,7 +89,7 @@ async function preview($: $, theme: Theme): Promise<string> {
       await update($, choice, was => ({ ...was, preview: undefined }))
       const back = themeOf(now.applied)
       if (back !== undefined) await setLook($, back)
-      else await $.theme.clear()
+      else await own(() => $.theme.clear())
     } catch {
       // The look that stays is the preview; the next command sets another.
     }
@@ -156,6 +167,42 @@ function card($: $, { Box, Text, Button }: CardElements, now: Choice) {
   )
 }
 
+const RETAKE_DELAY_MS = 250
+// The number of takes in a minute is limited (`retakeBudget`): a mod that sets its theme again and again must not start a fight with no end.
+let retakeAt: number[] = []
+let retaking: { cancel(): void } | undefined
+let gaveUp = false
+
+/**
+ * Another mod can replace or clear the theme: the theme-examples plugin applies its own choice at each session start
+ * and at each prompt. While a theme of this mod is applied, it wins, and this puts it back a moment after. A preview
+ * is left alone, and `/themes off` lets go, since no theme is applied then.
+ */
+async function retake($: $): Promise<void> {
+  retaking?.cancel()
+  retaking = $.clock.after(RETAKE_DELAY_MS, async () => {
+    retaking = undefined
+    try {
+      const now = await read($, choice)
+      if (now.preview !== undefined) return
+      const theme = themeOf(now.applied)
+      if (theme === undefined) return
+      const budget = retakeBudget(retakeAt, await $.clock.now())
+      retakeAt = budget.times
+      if (!budget.isAllowed) {
+        if (!gaveUp) {
+          gaveUp = true
+          void $.ui.toast('custom-themes: another mod keeps replacing the theme, so it stops taking the theme back. Turn that mod off, or type /themes off.')
+        }
+        return
+      }
+      await setLook($, theme)
+    } catch {
+      // The look is decoration. A failure here must not reach the other mod or the session.
+    }
+  })
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     try {
@@ -174,6 +221,19 @@ export const register: Register = on => {
     }
     return next(e)
   })
+
+  // A theme set or cleared by another mod: take the applied theme back (see `retake`). The call of the other mod goes on.
+  // One hook for each event, each with its own literal name.
+  on('theme.set', async ($, e, next) => {
+    const result = await next(e)
+    if (ownCalls === 0) await retake($)
+    return result
+  }).catch(($, e, next) => next(e))
+  on('theme.clear', async ($, e, next) => {
+    const result = await next(e)
+    if (ownCalls === 0) await retake($)
+    return result
+  }).catch(($, e, next) => next(e))
 
   // The context window changes with each turn and after a compaction.
   on('turn.start', async ($, e, next) => {
