@@ -1739,7 +1739,7 @@ export const register: Register = on => {
   // that item, and a second press closes it.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)
-    const { Box, Text, Button } = t
+    const { Box, Text, Button, Link } = t
     const v = await read($, view)
     const me = await $.session.id()
     const now = await $.clock.now()
@@ -2037,6 +2037,9 @@ export const register: Register = on => {
                               {a.label}
                             </Button>
                           ))}
+                          {r.url !== undefined && /^https?:\/\//.test(r.url) && (
+                            <Link href={r.url} label="↗ Open in the browser" />
+                          )}
                         </Box>
                       )}
                       {hasDetail && (
