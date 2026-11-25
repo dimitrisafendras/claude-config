@@ -72,11 +72,11 @@ test('a start with nothing stored applies the first theme, Christmas Night', asy
   expect(await cmd($, 'list')).toContain(`${XMAS.id} (applied)`)
 })
 
-test('/themes <name> applies for the project, and a new start sets it again', async ($, on) => {
+test('/themes <name> applies for all projects, and a new start sets it again', async ($, on) => {
   world(on, { applied: 'none' })
   await $.session.start(START)
   expect(SETS.length).toBe(0)
-  expect(await cmd($, 'christmas-night')).toContain('Christmas Night is set. Saved for this project.')
+  expect(await cmd($, 'christmas-night')).toContain('Christmas Night is set. Saved for all projects.')
   expect(SETS[0]?.backdrop).toMatchObject({ scene: XMAS.id })
   SETS.length = 0
   await $.session.start(START)

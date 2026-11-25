@@ -49,17 +49,17 @@ async function setLook($: $, theme: Theme): Promise<string> {
   }
 }
 
-/** Applies a theme (or none) and keeps the choice: in the store for the project, or in the session state only. */
-async function apply($: $, theme: Theme | undefined, forProject: boolean): Promise<string> {
+/** Applies a theme (or none) and keeps the choice: in the store for all projects (one file for the user), or in the session state only. */
+async function apply($: $, theme: Theme | undefined, forAll: boolean): Promise<string> {
   if (theme === undefined) {
-    if (forProject) await $.store.set(STORE_KEY, 'none')
-    const scope: Choice['scope'] = forProject ? undefined : 'session'
+    if (forAll) await $.store.set(STORE_KEY, 'none')
+    const scope: Choice['scope'] = forAll ? undefined : 'session'
     await update($, choice, was => ({ ...was, applied: undefined, scope, preview: undefined }))
     await $.theme.clear()
     return 'No theme.'
   }
-  if (forProject) await $.store.set(STORE_KEY, theme.id)
-  const scope: Choice['scope'] = forProject ? 'project' : 'session'
+  if (forAll) await $.store.set(STORE_KEY, theme.id)
+  const scope: Choice['scope'] = forAll ? 'project' : 'session'
   await update($, choice, was => ({ ...was, applied: theme.id, scope, preview: undefined }))
   return setLook($, theme)
 }
@@ -86,7 +86,7 @@ async function preview($: $, theme: Theme): Promise<string> {
   return `Preview of ${said} It ends in 20 seconds.`
 }
 
-/** The theme at a start: the session's own choice, else the project's from the store. */
+/** The theme at a start: the session's own choice, else the one from the store, which all projects share. */
 async function startTheme($: $): Promise<void> {
   const now = await read($, choice)
   const own = now.scope === 'session' ? themeOf(now.applied) : undefined
@@ -102,7 +102,7 @@ async function startTheme($: $): Promise<void> {
 
 function list(now: Choice): string {
   const lines = THEMES.map(t => `- ${t.id}${now.applied === t.id ? ' (applied)' : ''}: ${t.title}, for ${t.window === 'both' ? 'light and dark' : t.window} windows. ${t.blurb}`)
-  return `Themes (${THEMES.length}):\n${lines.join('\n')}\n/${COMMAND} <name> applies one to this project; add "session" for this session only. /${COMMAND} off clears it. /${COMMAND} preview <name> shows it for 20 seconds.`
+  return `Themes (${THEMES.length}):\n${lines.join('\n')}\n/${COMMAND} <name> applies one to all projects; add "session" for this session only. /${COMMAND} off clears it. /${COMMAND} preview <name> shows it for 20 seconds.`
 }
 
 async function putCardAway($: $): Promise<void> {
@@ -240,7 +240,7 @@ export const register: Register = on => {
       if (theme === undefined) return { text: `No theme named "${name}". ${list(now)}` }
       const unpainted = theme.problems.find(p => p.startsWith("Desktop won't paint"))
       const said = await apply($, theme, !forSession)
-      return { text: `${said}${forSession ? ' This session only.' : ' Saved for this project.'}${unpainted === undefined ? '' : `\n${unpainted}`}` }
+      return { text: `${said}${forSession ? ' This session only.' : ' Saved for all projects.'}${unpainted === undefined ? '' : `\n${unpainted}`}` }
     } catch (err) {
       return { text: `Custom themes: the change failed (${message(err)}).` }
     }
