@@ -38,6 +38,16 @@ export type Flow = {
   title?: string
   since?: number
   started: string[]
+  me?: Involvement
+}
+
+/** How much of the session the person took part in. `idleSince` is when the last main turn ended; a running turn has none. */
+export type Involvement = {
+  mine: number
+  mineMs: number
+  waitMs: number
+  busyMs: number
+  idleSince?: number
 }
 
 export type PeerAgent = {

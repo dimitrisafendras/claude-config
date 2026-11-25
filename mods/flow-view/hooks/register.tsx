@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Board, Call, Flow, FlowNode, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
+import type { Board, Call, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
 
 const PANE = 'flow-view'
 const MAIN = 'main'
@@ -506,6 +506,80 @@ export function esc(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+// ---------- time of the person (pure) ----------
+
+const NO_PART: Involvement = { mine: 0, mineMs: 0, waitMs: 0, busyMs: 0 }
+/** The least and the most that one message of the person counts as their time. */
+export const MIN_ATTENTION_MS = 30_000
+export const MAX_ATTENTION_MS = 300_000
+/** Prompts that a person typed: in the app, or from another device. */
+const TYPED = new Set(['composer', 'bridge'])
+
+/** True when a person wrote this prompt. A notice, a mod or another session starts the other turns. */
+export function isTyped(e: { text: string; command?: unknown; isMeta?: true; origin?: { kind: string } }): boolean {
+  if (e.command !== undefined || e.isMeta === true) return false
+  if (e.origin !== undefined && !TYPED.has(e.origin.kind)) return false
+  const text = e.text.trim()
+
+  return text !== '' && !text.startsWith('<')
+}
+
+/**
+ * One message of the person at `at`. The work waited for them from the end of the last turn. Their own time is
+ * that wait, but not less than 30 seconds (to read and to write) and not more than 5 minutes (a longer wait is
+ * time away, not time on this work).
+ */
+export function said(m: Involvement | undefined, at: number): Involvement {
+  const p = m ?? NO_PART
+  const wait = p.idleSince === undefined ? 0 : Math.max(0, at - p.idleSince)
+
+  return {
+    ...p,
+    mine: p.mine + 1,
+    waitMs: p.waitMs + wait,
+    mineMs: p.mineMs + Math.min(MAX_ATTENTION_MS, Math.max(MIN_ATTENTION_MS, wait)),
+    // One wait is counted one time: a second message before the turn starts adds only the least time.
+    idleSince: p.idleSince === undefined ? undefined : at,
+  }
+}
+
+/** The main turn started (`endedAt` undefined) or ended after `ranMs`. */
+export function turned(m: Involvement | undefined, endedAt?: number, ranMs = 0): Involvement {
+  const { idleSince: _, ...p } = m ?? NO_PART
+
+  return endedAt === undefined ? p : { ...p, busyMs: p.busyMs + Math.max(0, ranMs), idleSince: endedAt }
+}
+
+export type TimeFacts = { totalMs: number; busyMs: number; mineMs: number; waitMs: number; mine: number; auto: number; share: number }
+
+/** The numbers of the Time section. `share` is the part of the total time that was the person's, from 0 to 100. */
+export function timeFacts(f: Pick<Flow, 'since' | 'turns' | 'me' | 'nodes'>, now: number): TimeFacts | undefined {
+  if (f.since === undefined) return undefined
+  const p = f.me ?? NO_PART
+  const main = f.nodes.find(n => n.id === MAIN)
+  const live = main !== undefined && main.status === 'running' ? Math.max(0, now - main.startedAt) : 0
+  const totalMs = Math.max(0, now - f.since)
+  const mineMs = Math.min(p.mineMs, totalMs)
+
+  return {
+    totalMs,
+    busyMs: Math.min(totalMs, p.busyMs + live),
+    mineMs,
+    waitMs: Math.min(p.waitMs, totalMs),
+    mine: p.mine,
+    auto: Math.max(0, f.turns - p.mine),
+    share: totalMs > 0 ? Math.round((mineMs / totalMs) * 100) : 0,
+  }
+}
+
+/** The Time section in two lines of text. */
+export function timeLines(t: TimeFacts): [string, string] {
+  return [
+    `Total ${span(t.totalMs)} · Claude worked ${span(t.busyMs)} · ${plural(t.auto, 'turn')} started with no message of yours`,
+    `You: ${plural(t.mine, 'message')} · about ${span(t.mineMs)} of your time (${t.share}%) · the work waited ${span(t.waitMs)} for you`,
+  ]
 }
 
 export function span(ms: number): string {
@@ -1235,7 +1309,10 @@ async function flowCommand($: EngineInterface, raw: string): Promise<string> {
     const live = list.filter(p => p.status === 'running').length
     const needs = day.rows.filter(r => bucket(r.state) === 'needs').length
 
-    return `${plural(list.length, 'session')} (${live} run). Plan ${day.id || 'none'}: ${plural(day.rows.length, 'ticket')}, ${needs} need you.`
+    const time = timeFacts(await read($, flow), await $.clock.now())
+    const lines = time === undefined ? '' : `\n${timeLines(time).join('\n')}`
+
+    return `${plural(list.length, 'session')} (${live} run). Plan ${day.id || 'none'}: ${plural(day.rows.length, 'ticket')}, ${needs} need you.${lines}`
   }
   if (arg === 'clear') {
     demoTimer?.cancel()
@@ -1296,6 +1373,7 @@ export const register: Register = on => {
             ...g,
             turns: g.turns + 1,
             since: g.since ?? at,
+            me: turned(g.me),
             // A turn that a system notice starts has no words of the person.
             title:
               g.title !== undefined && !g.title.startsWith('<')
@@ -1316,15 +1394,31 @@ export const register: Register = on => {
     const id = e.agentId ?? MAIN
     const status =
       e.reason === 'error' ? 'failed' : e.isAborted ? 'stopped' : 'completed'
-    await update($, flow, f =>
-      patch(f, id, n =>
+    await update($, flow, f => {
+      const main = id === MAIN ? f.nodes.find(n => n.id === MAIN && n.status === 'running') : undefined
+      const g = patch(f, id, n =>
         n.status === 'running' ? { ...n, status, endedAt: at } : n,
-      ),
-    )
+      )
+
+      return main === undefined ? g : { ...g, me: turned(g.me, at, at - main.startedAt) }
+    })
     await publish($)
 
     return next(e)
   })
+
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      if (isTyped(e)) {
+        const at = await $.clock.now()
+        await update($, flow, f => ({ ...f, me: said(f.me, at) }))
+      }
+    } catch {
+      // The time count is a view only: a prompt always goes through.
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const ran = await next(e)
@@ -1420,6 +1514,7 @@ export const register: Register = on => {
     const tab = (name: View['tab']) => () => update($, view, w => ({ ...w, tab: name }))
     const openTicket = (id: string) => () => update($, view, w => ({ ...w, ticket: w.ticket === id ? '' : id }))
     const openSession = (id: string) => () => update($, view, w => ({ ...w, session: w.session === id ? '' : id }))
+    const time = timeFacts(await read($, flow), now)
     const tint = (status: FlowNode['status']) =>
       status === 'running' ? 'suggestion' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'stopped' ? 'warning' : 'inactive'
 
@@ -1436,6 +1531,15 @@ export const register: Register = on => {
             {isDemo ? 'Stop demo' : 'Demo'}
           </Button>
         </Box>
+
+        {time !== undefined && (
+          <Box key="time" flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
+            <Text bold>Time of this session</Text>
+            <Text>{timeLines(time)[0]}</Text>
+            <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
+            <Text dimColor>Estimate: each message of yours counts the wait before it, from 30s to 5m.</Text>
+          </Box>
+        )}
 
         {v.tab === 'tickets' && day.id === '' && <Text dimColor>No plan yet. Run /start-work, or press Demo.</Text>}
 

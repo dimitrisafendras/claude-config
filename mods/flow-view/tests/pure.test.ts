@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -207,4 +207,50 @@ test('applyFact moves the matching row forward and never back', () => {
   expect(applyFact(day, { ticket: 'SN-1', state: 'blocked' }, 9).rows[0]?.state).toBe('blocked')
   expect(applyFact(day, { pr: 8, state: 'merged' }, 9)).toBe(day)
   expect(applyFact(day, { pr: 99, state: 'merged' }, 9)).toBe(day)
+})
+
+
+test('isTyped is true only for a prompt that a person wrote', () => {
+  expect(isTyped({ text: 'Fix the cart', origin: { kind: 'composer' } })).toBe(true)
+  expect(isTyped({ text: 'Fix the cart', origin: { kind: 'bridge' } })).toBe(true)
+  expect(isTyped({ text: 'Fix the cart' })).toBe(true)
+  expect(isTyped({ text: 'ci: PR 7 is red', origin: { kind: 'plugin' } })).toBe(false)
+  expect(isTyped({ text: '<task-notification>done</task-notification>', origin: { kind: 'composer' } })).toBe(false)
+  expect(isTyped({ text: 'status', command: {}, origin: { kind: 'composer' } })).toBe(false)
+  expect(isTyped({ text: 'x', isMeta: true, origin: { kind: 'composer' } })).toBe(false)
+  expect(isTyped({ text: '  ', origin: { kind: 'composer' } })).toBe(false)
+})
+
+test('said counts the wait one time, and the time of the person from 30 seconds to 5 minutes', () => {
+  const first = said(undefined, 1_000)
+  expect(first).toEqual({ mine: 1, mineMs: 30_000, waitMs: 0, busyMs: 0 })
+  const idle = turned(turned(first), 100_000, 60_000)
+  expect(idle).toEqual({ mine: 1, mineMs: 30_000, waitMs: 0, busyMs: 60_000, idleSince: 100_000 })
+  const quick = said(idle, 110_000)
+  expect(quick.mineMs).toBe(60_000)
+  expect(quick.waitMs).toBe(10_000)
+  const again = said(quick, 112_000)
+  expect(again.waitMs).toBe(12_000)
+  expect(again.mine).toBe(3)
+  const away = said(turned(turned(first), 100_000, 60_000), 100_000 + 3_600_000)
+  expect(away.waitMs).toBe(3_600_000)
+  expect(away.mineMs).toBe(30_000 + 300_000)
+  expect(turned(away).idleSince).toBeUndefined()
+})
+
+test('timeFacts gives the total, the work time and the share of the person', () => {
+  expect(timeFacts({ turns: 0, nodes: [] }, 5)).toBeUndefined()
+  const facts = timeFacts(
+    {
+      since: 0,
+      turns: 5,
+      me: { mine: 2, mineMs: 360_000, waitMs: 900_000, busyMs: 1_800_000 },
+      nodes: [{ id: 'main', label: 'Main', kind: 'main', status: 'running', startedAt: 3_000_000, calls: 0, errors: 0 }],
+    },
+    3_600_000,
+  )
+  expect(facts).toEqual({ totalMs: 3_600_000, busyMs: 2_400_000, mineMs: 360_000, waitMs: 900_000, mine: 2, auto: 3, share: 10 })
+  if (facts === undefined) return
+  expect(timeLines(facts)[0]).toBe('Total 1h 00m · Claude worked 40m 00s · 3 turns started with no message of yours')
+  expect(timeLines(facts)[1]).toBe('You: 2 messages · about 6m 00s of your time (10%) · the work waited 15m 00s for you')
 })
