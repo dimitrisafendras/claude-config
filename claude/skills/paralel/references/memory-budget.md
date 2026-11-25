@@ -19,4 +19,9 @@ Run `bash ~/.claude/mem-budget.sh` from any folder. `install.sh` links it from `
 3. **Agents:** the plan sets the count per session: `min(independent subtasks, room, 3 per lane)` (`plan-the-fan-out.md`). Reads and edits cost little; every heavy job still waits on the script.
 4. **Heavy jobs:** every lane runs the script before a full suite, `npm ci`, a dev server or a simulator, and waits (re-check every few minutes) on exit 1. Locally run targeted tests for touched files; CI runs the full suite. Never two `npm ci` at once in one lane; stop dev servers and Metro when done.
 5. **Coordinator watch:** re-run the script whenever a lane reports and before starting anything new. If free memory drops under the floor, tell the busiest lane to pause its next heavy step, and do not start new lanes until it recovers.
-6. **After a crash:** sessions' background agents die with the app. Message each lane to resume under these limits and to check its pushed sub-branches for saved WIP before re-dispatching.
+6. **Start only what the task needs, and stop it when the step ends.**
+   - A local environment (Docker Compose, a worktree environment, dev servers) starts only for the step that needs it: the smoke test or a browser check. Unit tests, lint and type checks need none.
+   - Start the smallest set of components that the step uses. Do not start a full stack "to be safe".
+   - Stop it right after the step (the repo's own "down" command; never the "reset" before the merge). A lane that waits for CI or review holds no environment.
+   - Before a spawn that gets exit 1, run `bash ~/.claude/mem-free.sh --apply`, then measure again. The script stops the idle Docker Compose projects (no process works in their checkout); it removes nothing. `--apps` also quits the apps that the person listed in `~/.claude/mem-free.apps`. The `memory-governor` mod runs both when free memory drops below the floor, and `/memgov free` runs them by hand.
+7. **After a crash:** sessions' background agents die with the app. Message each lane to resume under these limits and to check its pushed sub-branches for saved WIP before re-dispatching.
