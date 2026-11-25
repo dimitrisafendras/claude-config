@@ -119,7 +119,8 @@ test('with no HOME (Windows) the buttons come from USERPROFILE', async ($, on) =
   world(on, { USERPROFILE: 'C:\\Users\\me' })
   CONFIG = JSON.stringify({ buttons: [{ label: 'mine', command: '/paralel' }] })
   await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
-  expect(READS).toContain('C:/Users/me/.claude/cheat-buttons.json')
+  // The engine makes the path native, so on Linux it differs from Windows: check only its end.
+  expect(READS.some(p => p.endsWith('Users/me/.claude/cheat-buttons.json'))).toBe(true)
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await ui.find({ type: 'Button', text: /mine/ }))?.text).toContain('mine')
   expect(await ui.find({ type: 'Button', text: /^day$/ })).toBeUndefined()
