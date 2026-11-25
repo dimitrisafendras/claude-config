@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, groupTickets, progress, stepOf, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -253,4 +253,28 @@ test('timeFacts gives the total, the work time and the share of the person', () 
   if (facts === undefined) return
   expect(timeLines(facts)[0]).toBe('Total 1h 00m · Claude worked 40m 00s · 3 turns started with no message of yours')
   expect(timeLines(facts)[1]).toBe('You: 2 messages · about 6m 00s of your time (10%) · the work waited 15m 00s for you')
+})
+
+test('stepOf shows how far a ticket is, and no step for a ticket that waits for the person', () => {
+  expect(stepOf('queued').text).toBe('●○○○○ queued 1/5')
+  expect(stepOf('review').text).toBe('●●●○○ review 3/5')
+  expect(stepOf('draft').at).toBe(3)
+  expect(stepOf('verified').text).toBe('●●●●● verified 5/5')
+  expect(stepOf('closed').at).toBe(5)
+  expect(stepOf('needs-you')).toEqual({ total: 5, text: 'needs-you' })
+  expect(stepOf('blocked').at).toBeUndefined()
+})
+
+test('groupTickets puts what needs the person first and what is done last', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const groups = groupTickets([row('a', 'verified'), row('b', 'needs-you'), row('c', 'running'), row('d', 'merged'), row('e', 'blocked')])
+  expect(groups.map(g => `${g.label}:${g.rows.map(r => r.id).join('')}`)).toEqual(['NEEDS YOU:be', 'IN PROGRESS:c', 'DONE:ad'])
+  expect(groupTickets([])).toEqual([])
+})
+
+test('progress draws a bar with the count and the percent', () => {
+  expect(progress(5, 10, 10)).toBe('█████░░░░░ 5 of 10 done (50%)')
+  expect(progress(0, 4, 4)).toBe('░░░░ 0 of 4 done (0%)')
+  expect(progress(3, 3, 6)).toBe('██████ 3 of 3 done (100%)')
+  expect(progress(0, 0)).toBe('')
 })

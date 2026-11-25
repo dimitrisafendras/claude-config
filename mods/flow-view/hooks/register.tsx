@@ -1156,6 +1156,46 @@ export function sortTickets(list: Ticket[]): Ticket[] {
 }
 
 /** A short mark for the CI of a ticket. */
+// ---------- the ticket list as a report (pure) ----------
+
+const REVIEW_HUE = '#c084fc'
+const GROUPS: Record<(typeof ORDER)[number], { label: string; hue: string; mark: string }> = {
+  needs: { label: 'NEEDS YOU', hue: HUE.stopped, mark: '!' },
+  running: { label: 'IN PROGRESS', hue: HUE.running, mark: '◉' },
+  review: { label: 'IN REVIEW', hue: REVIEW_HUE, mark: '◐' },
+  queued: { label: 'NOT STARTED', hue: DIM, mark: '○' },
+  done: { label: 'DONE', hue: HUE.completed, mark: '✓' },
+}
+
+export type TicketGroup = { group: (typeof ORDER)[number]; label: string; hue: string; mark: string; rows: Ticket[] }
+
+/** The tickets in groups, in the order of the list: what needs the person first and what is done last. Empty groups are left out. */
+export function groupTickets(list: Ticket[]): TicketGroup[] {
+  return ORDER.map(group => ({ group, ...GROUPS[group], rows: list.filter(t => bucket(t.state) === group) })).filter(g => g.rows.length > 0)
+}
+
+/**
+ * How far a ticket is on the way from queued to verified: `at` of `total` steps are done. A ticket that waits for
+ * the person, is blocked or failed has no place on that way: `at` is undefined.
+ */
+export function stepOf(state: string): { at?: number; total: number; text: string } {
+  const total = STAGES.length
+  const key = state === 'draft' ? 'review' : state === 'pending' ? 'running' : state === 'closed' || state === 'skipped' || state === 'done' ? 'verified' : state
+  const i = STAGES.indexOf(key)
+  if (i === -1) return { total, text: state }
+  const at = i + 1
+
+  return { at, total, text: `${'●'.repeat(at)}${'○'.repeat(total - at)} ${state} ${at}/${total}` }
+}
+
+/** A bar of `width` cells for `done` of `total`, with the count and the percent. */
+export function progress(done: number, total: number, width = 20): string {
+  if (total <= 0) return ''
+  const filled = Math.min(width, Math.max(0, Math.round((done / total) * width)))
+
+  return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${done} of ${total} done (${Math.round((done / total) * 100)}%)`
+}
+
 export function ciMark(t: Ticket): string {
   if (t.ci === 'green' || t.ci === 'passed') return '✓ CI'
   if (t.ci === 'red' || t.ci === 'failed') return '✗ CI'
@@ -1578,28 +1618,59 @@ export const register: Register = on => {
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
             {rows.length > 0 && v.ticket === '' && <Text dimColor>Press a ticket to open its breakdown. Press it again to close it.</Text>}
             {matching.length > rows.length && <Text dimColor>+{matching.length - rows.length} more tickets, below the first {rows.length}.</Text>}
-            {rows.map(r => {
-              const { status, hue } = tone(r.state)
-              const isOpen = v.ticket === r.id
-              const facts = ticketFacts(r)
+            {v.filter === 'all' && sorted.length > 0 && (
+              <Text key="progress" bold color={HUE.completed}>
+                {progress(count('done'), sorted.length)}
+              </Text>
+            )}
+            {rows.length > 0 && (
+              <Text dimColor>
+                Steps: <Text color={HUE.completed}>●</Text> done <Text dimColor>○</Text> to do · queued → running → review → merged → verified
+              </Text>
+            )}
+            {groupTickets(rows).map(g => (
+              <Box key={`group-${g.group}`} flexDirection="column">
+                <Text bold color={g.hue}>
+                  ▌ {g.label} · {g.rows.length}
+                </Text>
+                {g.rows.map(r => {
+                  const isOpen = v.ticket === r.id
+                  const facts = ticketFacts(r)
+                  const step = stepOf(r.state)
+                  const isDone = g.group === 'done'
+                  const isBad = r.state === 'failed' || r.state === 'blocked'
+                  const hue = isBad ? HUE.failed : g.hue
+                  const ci = ciMark(r)
 
-              return (
-                <Box flexDirection="column">
-                  <Button key={`ticket-${r.id}`} plain onPress={openTicket(r.id)}>
-                    <Text color={hue}>{MARK[status]}</Text> {r.n !== undefined ? `#${r.n} ` : ''}
-                    {clip(r.title, 48)} <Text color={hue}>{r.state}</Text>
-                    {r.prNumber !== undefined ? <Text dimColor>{` PR #${r.prNumber}`}</Text> : null}
-                    {ciMark(r) !== '' ? <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : HUE.completed}>{` ${ciMark(r)}`}</Text> : null}
-                  </Button>
-                  {isOpen && facts !== '' && <Text dimColor>{facts}</Text>}
-                  {isOpen && r.note !== undefined && <Text color="warning">{clip(r.note, 100)}</Text>}
-                  {isOpen && r.url !== undefined && <Text dimColor>{clip(r.url, 100)}</Text>}
-                  {isOpen && 'Svg' in t && (
-                    <t.Svg source={drawTicket(r, day.workers).source} width={width} alt={`Ticket ${r.title}: ${r.state}.`} />
-                  )}
-                </Box>
-              )
-            })}
+                  return (
+                    <Box flexDirection="column">
+                      <Button key={`ticket-${r.id}`} plain onPress={openTicket(r.id)}>
+                        <Text bold color={hue}>
+                          {isBad ? '✗' : g.mark}
+                        </Text>{' '}
+                        <Text dimColor>{r.n !== undefined ? `#${r.n} ` : ''}</Text>
+                        <Text bold={!isDone} dimColor={isDone}>
+                          {clip(r.title, 44)}
+                        </Text>{' '}
+                        <Text bold={step.at === undefined} color={hue}>
+                          {step.text}
+                        </Text>
+                        {r.prNumber !== undefined ? <Text dimColor>{` · PR #${r.prNumber}`}</Text> : null}
+                        {ci !== '' ? (
+                          <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{` · ${ci}`}</Text>
+                        ) : null}
+                      </Button>
+                      {isOpen && facts !== '' && <Text dimColor>{facts}</Text>}
+                      {isOpen && r.note !== undefined && <Text color="warning">{clip(r.note, 100)}</Text>}
+                      {isOpen && r.url !== undefined && <Text dimColor>{clip(r.url, 100)}</Text>}
+                      {isOpen && 'Svg' in t && (
+                        <t.Svg source={drawTicket(r, day.workers).source} width={width} alt={`Ticket ${r.title}: ${r.state}.`} />
+                      )}
+                    </Box>
+                  )
+                })}
+              </Box>
+            ))}
           </Box>
         )}
 

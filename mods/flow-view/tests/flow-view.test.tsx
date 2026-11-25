@@ -102,7 +102,7 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'demo' })
   await clock.advance(10000)
-  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/#1 Login fails after a token refresh\s+running/)
+  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/#1 Login fails after a token refresh\s+●●○○○ running 2\/5/)
   const plan = await drawn(ui)
   expect(plan).toContain('START WORK')
   expect(plan).toContain('BREAKDOWN')
@@ -159,7 +159,7 @@ test('the plan of /start-work shows as tickets, and a press opens the breakdown'
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await drawn(ui)).toContain('2026-11-22')
   expect(await ui.find({ type: 'Text', text: /Sign in to the board/ })).toBeDefined()
-  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page\s+review/)
+  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page\s+●●●○○ review 3\/5/)
 
   await ui.press({ key: 'ticket-r01' })
   const open = await drawn(ui)
@@ -252,8 +252,8 @@ test('a merge and a board move in this session update the ticket without a monit
   await clock.advance(3000)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+merged/)
-  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+running/)
+  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+●●●●○ merged 4\/5/)
+  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+●●○○○ running 2\/5/)
   await ui.unmount()
 })
 
