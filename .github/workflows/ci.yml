@@ -22,14 +22,15 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      # On Windows, ln -s makes a real link (or fails), not a copy.
-      MSYS: ${{ runner.os == 'Windows' && 'winsymlinks:nativestrict' || '' }}
     steps:
       # Keep LF in shell files on Windows. This runs before checkout.
       - name: Keep LF line endings
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
+      # On Windows, ln -s makes a real link (or fails), not a copy. No variable is set on Linux.
+      - name: Make real symlinks
+        if: runner.os == 'Windows'
+        run: echo "MSYS=winsymlinks:nativestrict" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Shell syntax
         run: git ls-files -z '*.sh' | xargs -0 -r -n1 bash -n
