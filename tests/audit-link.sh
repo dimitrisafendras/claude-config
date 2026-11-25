@@ -13,7 +13,9 @@ esac
 if ! { ln -s "$ROOT/claude/skills/setup-audit" "$T/home/.claude/skills/setup-audit" 2>/dev/null \
   && [ -L "$T/home/.claude/skills/setup-audit" ]; }; then
   case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) echo "audit-link: skipped: no symbolic links here"; exit 0;;
+    MINGW*|MSYS*|CYGWIN*)
+      if [ -n "${CI:-}" ]; then echo "FAIL: no symbolic links here, and CI is set"; exit 1; fi
+      echo "audit-link: skipped: no symbolic links here"; exit 0;;
     *) echo "FAIL: cannot make a symbolic link in $T"; exit 1;;
   esac
 fi

@@ -16,7 +16,9 @@ LINKS=1
 if ! { ln -s "$ROOT/install.sh" "$T/link-probe" 2>/dev/null && [ -L "$T/link-probe" ]; }; then
   LINKS=""
   case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) echo "skipped: no symbolic links here (tests 6 and 9)";;
+    MINGW*|MSYS*|CYGWIN*)
+      if [ -n "${CI:-}" ]; then echo "FAIL: no symbolic links here, and CI is set"; fail=1
+      else echo "skipped: no symbolic links here (tests 6 and 9)"; fi;;
     *) echo "FAIL: cannot make a symbolic link in $T"; fail=1;;
   esac
 fi
