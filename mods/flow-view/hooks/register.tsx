@@ -1452,28 +1452,7 @@ export function drawPhases(b: Board): Drawing {
       icon(state, x, y) +
       `<text x="${x}" y="${y + 29}" class="${i === at ? 'b' : state === 'completed' ? 't' : 's'}" text-anchor="middle">${esc(shown)}</text></g>`
   })
-  const total = b.rows.length
-  if (total === 0) return frame(svg, 104)
-  // One bar for all tickets, in parts: done, in progress, in review, blocked or waiting for the person, queued.
-  const parts = phaseParts(b.rows)
-  const bar = W - 24
-  let x = 12
-  svg += `<rect x="12" y="106" width="${bar}" height="5" rx="2.5" fill="${EDGE}"/>`
-  for (const part of parts) {
-    const w = Math.round((bar * part.n) / total)
-    if (w > 0) svg += `<rect x="${x}" y="106" width="${w}" height="5" rx="2.5" fill="${part.hue}"${part.key === 'done' ? ' filter="url(#glow)"' : ''}><title>${part.n} ${part.label}</title></rect>`
-    x += w
-  }
-  const done = parts.find(part => part.key === 'done')?.n ?? 0
-  svg += `<text x="12" y="126" class="s">${done} of ${total} tickets done${isClosedOpen ? ` · ${left} not done` : ''}</text>`
-  let lx = 12
-  for (const part of parts.filter(q => q.key !== 'done')) {
-    const text = `${part.n} ${part.label}`
-    svg += `<circle cx="${lx + 4}" cy="141" r="3.5" fill="${part.hue}"/><text x="${lx + 12}" y="145" class="${part.n > 0 ? 't' : 's'}">${text}</text>`
-    lx += 12 + text.length * 6.4 + 14
-  }
-
-  return frame(svg, 156)
+  return frame(svg, 104)
 }
 
 /** One ticket, opened: its session, its agents and its PR. */
@@ -1845,10 +1824,10 @@ export const register: Register = on => {
 
         <Box key="overview" flexDirection="row" gap={2} flexWrap="wrap">
           {'Svg' in t && sorted.length > 0 && (
-            <t.Svg source={drawOverview(sorted).source} width={180} alt={`${count('done')} of ${sorted.length} tickets done.`} />
+            <t.Svg source={drawOverview(sorted).source} width={150} alt={`${count('done')} of ${sorted.length} tickets done.`} />
           )}
           {time !== undefined && (
-            <Box flexDirection="column" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
+            <Box flexDirection="column" alignSelf="flex-start" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
               <Text bold>⏱ Time of this session</Text>
               <Text>{timeLines(time)[0]}</Text>
               <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
