@@ -28,11 +28,11 @@ export const THEMES: readonly Theme[] = [
   {
     id: CHRISTMAS_SCENE,
     title: 'Christmas Night',
-    blurb: 'Snowy pine trees with lights and a star on each top, a moon, falling snow. The snow ground rises as the context fills and falls after /compact or /clear.',
+    blurb: 'A snowy village under a moon and a faint aurora: a decorated tree with gifts and a snowman, pines, an A-frame cabin, small houses, and a robin on a sign that shows the context fill. As the context fills, more snow lies on the trees and the roofs, and the drifts rise and cover the village; the snow goes after /compact or /clear.',
     window: 'dark',
     look: CHRISTMAS_LOOK,
     scene: christmasScene,
-    alt: percent => `A Christmas night: snowy pine trees with lights under a moon, ${flakeCount(percent)} falling flakes, and snow on the ground at ${percent} percent of the context window`,
+    alt: percent => `A Christmas night: a snowy village with a decorated tree and a cabin under a moon, ${flakeCount(percent)} falling flakes, and snow on the ground at ${percent} percent of the context window`,
     problems: CHRISTMAS_PROBLEMS,
   },
   {
