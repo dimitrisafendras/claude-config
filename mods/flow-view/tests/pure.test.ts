@@ -91,11 +91,14 @@ test('ticketFacts keeps the PR and its CI at the end', () => {
   expect(ticketFacts({ id: 'r', title: 't', state: 'queued' })).toBe('')
 })
 
-test('the phases drawing shows the stages and the open count only, the ring shows the counts', () => {
+test('the phases drawing shows how many tickets are done', () => {
   const day = demoBoard(22, 0)
-  expect(drawPhases(day).source).not.toContain('tickets done')
-  expect(drawPhases(day).source).toContain('closed,')
-  expect(drawOverview(day.rows).source).toContain('done')
+  const src = drawPhases(day).source
+  expect(src).toContain('OF THE DAY')
+  expect(src).toContain('<title>')
+  // No count that the tiles give: the bar, its line and the legend are gone.
+  expect(src).not.toContain('tickets done')
+  expect(drawPhases({ ...day, rows: [] }).source).toContain('no tickets')
 })
 
 test('the steps drawing shows the progress and the time spent', () => {
@@ -332,22 +335,28 @@ test('a closed day with open tickets does not show a green done step', () => {
   const day = { id: 'd', phase: 'done', needsYou: [], updatedAt: 1, workers: [], rows: [row('a', 'verified'), row('b', 'needs-you'), row('c', 'review')] }
   const open = drawPhases(day).source
   expect(open).toContain('closed, 2 open')
-  expect(drawOverview(day.rows).source).toContain('1 of 3 done')
-  expect(phaseParts(day.rows).find(q => q.key === 'needs')?.n).toBe(1)
-  expect(phaseParts(day.rows).find(q => q.key === 'queued')?.n).toBe(0)
+  expect(open).toContain('33%')
+  expect(open).toContain('<title>need you: 1</title>')
+  expect(open).not.toContain('blocked: 0')
   const all = drawPhases({ ...day, rows: [row('a', 'verified'), row('d', 'merged')] }).source
   expect(all).not.toContain('closed,')
+  expect(open).toContain('>2 open</text>')
   expect(all).toContain('>done</text>')
-  expect(drawOverview([row('a', 'verified'), row('d', 'merged')]).source).toContain('2 of 2 done')
+  expect(all).toContain('100%')
 })
 
 test('phaseParts counts blocked and queued tickets as their own parts', () => {
   const row = (id: string, state: string) => ({ id, title: id, state })
   const parts = phaseParts([row('a', 'verified'), row('b', 'needs-you'), row('c', 'blocked'), row('d', 'failed'), row('e', 'queued'), row('f', 'running'), row('g', 'draft')])
   expect(parts.map(p => `${p.key}:${p.n}`)).toEqual(['done:1', 'running:1', 'review:1', 'needs:1', 'blocked:2', 'queued:1'])
-  expect(drawOverview([row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')]).source).toContain('blocked: 1')
-  expect(phaseParts([row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')]).find(q => q.key === 'queued')?.n).toBe(1)
-  expect(drawOverview([row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')]).source).toContain('1 of 3 done')
+  const src = drawPhases({ id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')] }).source
+  expect(src).toContain('<title>blocked: 1</title>')
+  expect(src).toContain('<title>queued: 1</title>')
+  expect(src).toContain('33%')
+  const timed = drawPhases({ id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [row('a', 'merged')] }, { totalMs: 3_600_000, busyMs: 1_800_000, auto: 2, mine: 4, mineMs: 600_000, share: 17, waitMs: 120_000 })
+  expect(timed.source).toContain('your time')
+  expect(timed.source).toContain('17%')
+  expect(timed.tall).toBeGreaterThan(drawPhases({ id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [] }).tall)
 })
 
 test('promptKey makes prompts that differ in a number, a link, an id or a quoted name the same', () => {

@@ -1429,30 +1429,95 @@ export function phaseParts(rows: Ticket[]): PhasePart[] {
   ]
 }
 
-export function drawPhases(b: Board): Drawing {
+/**
+ * The top of the Today tab, one card: the ring of the day at the left (each group is an arc, the centre is the share
+ * that is done), the phases of the day as a pipeline at the right, and the time of this session below them.
+ * It gives no count that the tiles give and no line that a ticket card gives.
+ */
+export function drawPhases(b: Board, time?: TimeFacts): Drawing {
   const at = PHASES.indexOf(b.phase)
   // The day can close with tickets that are not done. The last step then says so: it is not a green check.
   const left = b.rows.filter(r => bucket(r.state) !== 'done').length
   const isClosedOpen = b.phase === 'done' && left > 0
-  let svg = heading(24, 'START WORK', at < 0 && b.phase ? `${b.id} · ${b.phase}` : b.id)
-  const y = 62
+  const total = b.rows.length
+  const tall = time === undefined ? 132 : 150
+  let svg =
+    `<defs><radialGradient id="halo" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="${HUE.completed}" stop-opacity="0.28"/><stop offset="1" stop-color="${HUE.completed}" stop-opacity="0"/></radialGradient>` +
+    `<linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.09"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.02"/></linearGradient></defs>` +
+    `<rect x="1" y="1" width="${W - 2}" height="${tall - 2}" rx="16" fill="url(#sheen)" stroke="${EDGE}"/>`
+
+  // The ring of the day.
+  const cx = 66
+  const cy = 66
+  const R = 44
+  const C = 2 * Math.PI * R
+  const parts = phaseParts(b.rows)
+  const done = parts.find(part => part.key === 'done')?.n ?? 0
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+  svg += `<circle cx="${cx}" cy="${cy}" r="${R + 16}" fill="url(#halo)"/><circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${EDGE}" stroke-width="9"/>`
+  let offset = 0
+  const shown = parts.filter(part => part.n > 0)
+  for (const part of shown) {
+    const len = (part.n / total) * C
+    // A small gap divides two arcs. One arc alone is a full ring.
+    const gap = shown.length > 1 ? 2.5 : 0
+    svg +=
+      `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${part.hue}" stroke-width="9" stroke-dasharray="${Math.max(0.5, len - gap)} ${C - Math.max(0.5, len - gap)}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"` +
+      `${part.key === 'done' ? ' filter="url(#glow)"' : ''}><title>${esc(part.label)}: ${part.n}</title></circle>`
+    offset += len
+  }
+  svg +=
+    total === 0
+      ? `<text x="${cx}" y="${cy + 4}" text-anchor="middle" class="s">no tickets</text>`
+      : `<text x="${cx}" y="${cy + 5}" text-anchor="middle" class="b" style="font-size:25px">${pct}%</text>` +
+        `<text x="${cx}" y="${cy + 20}" text-anchor="middle" class="s" style="font-size:9px;letter-spacing:1px">OF THE DAY</text>`
+
+  // The name of the plan.
+  const x0 = 150
+  svg +=
+    `<g filter="url(#shadow)"><rect x="${x0 - 12}" y="12" width="92" height="20" rx="10" fill="#2b2f34"/></g>` +
+    `<text x="${x0 + 34}" y="26" class="h" text-anchor="middle">START WORK</text>` +
+    `<text x="${W - 14}" y="26" class="s" text-anchor="end">${esc(clip(at < 0 && b.phase ? `${b.id} · ${b.phase}` : b.id, 34))}</text>`
+
+  // The phases of the day.
+  const y = 66
+  const stepX = (W - 30 - x0) / (PHASES.length - 1)
   PHASES.forEach((name, i) => {
-    const x = 46 + i * 92
+    const x = Math.round(x0 + i * stepX)
     const isLast = i === PHASES.length - 1
     const state = at < 0 ? 'idle' : isLast && isClosedOpen ? 'stopped' : i < at || b.phase === 'done' ? 'completed' : i === at ? 'running' : 'idle'
-    const shown = isLast && isClosedOpen ? `closed, ${left} open` : name
+    const label = isLast && isClosedOpen ? `closed, ${left} open` : name
+    // The text under a step is short, so two texts do not touch: the tooltip has the full words.
+    const short = isLast && isClosedOpen ? `${left} open` : name === 'housekeeping' ? 'cleanup' : name
     if (i > 0) {
       const lit = i <= at ? HUE.completed : EDGE
-      svg += `<line x1="${x - 78}" y1="${y}" x2="${x - 14}" y2="${y}" stroke="${lit}" stroke-width="2" stroke-linecap="round"${i === at && b.phase !== 'done' ? ' stroke-dasharray="5 5"><animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.8s" repeatCount="indefinite"/></line>' : '/>'}`
+      const from = Math.round(x0 + (i - 1) * stepX) + 14
+      svg += `<line x1="${from}" y1="${y}" x2="${x - 14}" y2="${y}" stroke="${lit}" stroke-width="2" stroke-linecap="round"${i === at && b.phase !== 'done' ? ' stroke-dasharray="5 5"><animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.8s" repeatCount="indefinite"/></line>' : '/>'}`
     }
+    const anchor = `x="${x}" text-anchor="middle"`
     svg +=
-      `<g><title>${esc(shown)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : state === 'stopped' ? 'the day is closed, and some tickets are not done' : 'waits'}</title>` +
-      `<g filter="url(#shadow)"><circle cx="${x}" cy="${y}" r="13" fill="${CARD}"/></g>` +
-      `<circle cx="${x}" cy="${y}" r="13" fill="none" stroke="${HUE[state]}" stroke-width="1.6"${state === 'idle' ? '' : ' filter="url(#glow)"'}/>` +
+      `<g><title>${esc(label)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : state === 'stopped' ? 'the day is closed, and some tickets are not done' : 'waits'}</title>` +
+      `<g filter="url(#shadow)"><circle cx="${x}" cy="${y}" r="12" fill="${CARD}"/></g>` +
+      `<circle cx="${x}" cy="${y}" r="12" fill="none" stroke="${HUE[state]}" stroke-width="1.6"${state === 'idle' ? '' : ' filter="url(#glow)"'}/>` +
       icon(state, x, y) +
-      `<text x="${x}" y="${y + 29}" class="${i === at ? 'b' : state === 'completed' ? 't' : 's'}" text-anchor="middle">${esc(shown)}</text></g>`
+      `<text ${anchor} y="${y + 28}" class="${i === at || state === 'stopped' ? 'b' : state === 'completed' ? 't' : 's'}" style="font-size:10.5px">${esc(short)}</text></g>`
   })
-  return frame(svg, 104)
+
+  // The time of this session: the total, the share of the person, and how long the work waited.
+  if (time !== undefined) {
+    const [first, second] = timeLines(time)
+    const stat = (x: number, value: string, label: string, hue: string) =>
+      `<text x="${x}" y="134"><tspan class="b" style="fill:${hue}">${esc(value)}</tspan><tspan class="s" dx="6">${label}</tspan></text>`
+    svg +=
+      `<line x1="14" y1="118" x2="${W - 14}" y2="118" stroke="${EDGE}" stroke-opacity="0.7"/>` +
+      `<g><title>${esc(first)}. ${esc(second)}</title>` +
+      stat(18, span(time.totalMs), 'this session', INK) +
+      stat(x0 + 22, `${time.share}%`, 'your time', time.share >= 25 ? HUE.stopped : HUE.completed) +
+      stat(x0 + 146, span(time.waitMs), 'waited for you', INK) +
+      `</g>`
+  }
+
+  return frame(svg, tall)
 }
 
 /** One ticket, opened: its session, its agents and its PR. */
@@ -1802,6 +1867,9 @@ export const register: Register = on => {
     }
     const showOnce = v.once === true
     const toggleOnce = () => update($, view, w => ({ ...w, once: w.once !== true }))
+    // The notes of the coordinator start folded: the ticket cards below give the same facts for each ticket.
+    const showNotes = v.notes === true
+    const toggleNotes = () => update($, view, w => ({ ...w, notes: w.notes !== true }))
     const tint = (status: FlowNode['status']) =>
       status === 'running' ? 'suggestion' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'stopped' ? 'warning' : 'inactive'
 
@@ -1822,6 +1890,7 @@ export const register: Register = on => {
           </Button>
         </Box>
 
+        {!(v.tab === 'tickets' && day.id !== '' && 'Svg' in t) && (
         <Box key="overview" flexDirection="row" gap={2} flexWrap="wrap">
           {'Svg' in t && sorted.length > 0 && (
             <t.Svg source={drawOverview(sorted).source} width={150} alt={`${count('done')} of ${sorted.length} tickets done.`} />
@@ -1834,6 +1903,7 @@ export const register: Register = on => {
             </Box>
           )}
         </Box>
+        )}
 
         {v.tab === 'prompts' && (
           <Box flexDirection="column" gap={1}>
@@ -1897,17 +1967,21 @@ export const register: Register = on => {
         {v.tab === 'tickets' && day.id !== '' && (
           <Box flexDirection="column" gap={1}>
             {'Svg' in t ? (
-              <t.Svg source={drawPhases(day).source} width={width} alt={`Plan ${day.id}: phase ${day.phase}, ${count('done')} of ${sorted.length} tickets done.`} />
+              <t.Svg source={drawPhases(day, time).source} width={width} alt={`Plan ${day.id}: phase ${day.phase}, ${count('done')} of ${sorted.length} tickets done.`} />
             ) : (
               <Text bold>
                 Plan {day.id} · {day.phase}
               </Text>
             )}
-            {day.needsYou.slice(0, 3).map(line => (
-              <Text color="warning">! {clip(line, 90)}</Text>
-            ))}
-            {day.needsYou.length > 3 && <Text dimColor>+{day.needsYou.length - 3} more for you</Text>}
-            {day.headline !== undefined && <Text dimColor>{clip(day.headline, 100)}</Text>}
+            {(day.needsYou.length > 0 || day.headline !== undefined) && (
+              <Button key="notes" plain onPress={toggleNotes}>
+                <Text bold color={day.needsYou.length > 0 ? 'warning' : 'inactive'}>
+                  {showNotes ? '▾' : '▸'} {day.needsYou.length > 0 ? `! ${plural(day.needsYou.length, 'note')} for you` : 'Summary of the day'}
+                </Text>
+              </Button>
+            )}
+            {showNotes && day.headline !== undefined && <Text dimColor>{clip(day.headline, 160)}</Text>}
+            {showNotes && day.needsYou.map(line => <Text color="warning">! {clip(line, 120)}</Text>)}
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               {TILES.map(([group, label, hue]) => (
                 <Box borderStyle="round" borderColor={count(group) > 0 && (v.filter === group || v.filter === 'all') ? hue : 'subtle'} paddingX={1}>
