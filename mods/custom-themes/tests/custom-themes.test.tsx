@@ -1,7 +1,7 @@
 import type { On, ThemeSetArgs } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { THEMES, retakeBudget, themeOf } from '../hooks/themes'
+import { THEMES, otherOwner, retakeBudget, themeOf } from '../hooks/themes'
 
 const RUN = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 80 } }
 const START = { cwd: '/work', surface: 'desktop', isInteractive: true } as const
@@ -12,6 +12,7 @@ const backdrop = (id: string) =>
   ({ plugin: 'custom-themes', component: 'Backdrop', requestId: 'backdrop', props: { scene: id, plugin: 'custom-themes', glass: { blur: 6, tint: '#0b0f2e', opacity: 0.66 } } }) as const
 
 const SETS: ThemeSetArgs[] = []
+const TOASTS: string[] = []
 let clears = 0
 let isStyleRefused = false
 let percent: number | undefined = 0
@@ -22,12 +23,17 @@ let isPlaced = true
 // Each hook here stands for the engine, beneath the mod.
 function world(on: On, stored: Record<string, unknown> = {}): ReturnType<typeof mock.clock> {
   SETS.length = 0
+  TOASTS.length = 0
   clears = 0
   isStyleRefused = false
   percent = 0
   windowPercent = undefined
   isPlaced = true
   const clock = mock.clock(on, { now: Date.parse('2026-12-24T18:00:00Z') })
+  on('ui.toast', (_, e) => {
+    TOASTS.push(e.text)
+    return { value: undefined }
+  })
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000, ...(percent === undefined ? {} : { percent }), ...(windowPercent === undefined ? {} : { breakdown: { percentage: windowPercent } as never }) }, rateLimits: [] } }))
   mock.store(on, stored)
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -233,4 +239,34 @@ test('a build that refuses the style keeps the colors and the scene', async ($, 
   expect(await cmd($, 'christmas-night')).toContain('refused the message style')
   expect(SETS[0]?.style).toBeUndefined()
   expect(SETS[0]?.backdrop).toMatchObject({ scene: XMAS.id })
+})
+
+test('otherOwner: another plugin owns the theme; this mod, the engine and a settings hook do not', () => {
+  expect(otherOwner({ plugin: 'theme-examples', tier: 'user' }, 'custom-themes')).toBe('theme-examples')
+  expect(otherOwner({ plugin: 'custom-themes', tier: 'user' }, 'custom-themes')).toBeUndefined()
+  expect(otherOwner({ plugin: 'engine', tier: 'core' }, 'custom-themes')).toBeUndefined()
+  expect(otherOwner({ plugin: 'hook:SessionStart', tier: 'user' }, 'custom-themes')).toBeUndefined()
+  expect(otherOwner(undefined, 'custom-themes')).toBeUndefined()
+})
+
+// A second theme mod that sets its own theme at each session start.
+const OTHER_THEME = {
+  name: 'other-theme',
+  register(on: On) {
+    on('session.start', async ($, e, next) => {
+      await $.theme.set({ backdrop: { scene: 'other-scene' } })
+      return next(e)
+    })
+  },
+}
+
+test('a second theme owner at the session start: a toast, and this mod sets no theme and takes none back', { plugins: [OTHER_THEME] }, async ($, on) => {
+  const clock = world(on)
+  await $.session.start(START)
+  await clock.advance(1000)
+  expect(SETS.map(s => (s.backdrop as { scene?: string } | undefined)?.scene)).toEqual(['other-scene'])
+  expect(TOASTS.join('\n')).toContain('the plugin other-theme also sets the theme, so custom-themes sets none in this session')
+  // The person's own pick still applies.
+  expect(await cmd($, 'pixel-blue session')).toContain('Pixel Blue is set.')
+  expect(SETS[SETS.length - 1]?.backdrop).toMatchObject({ scene: PIXEL.id })
 })

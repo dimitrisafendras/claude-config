@@ -1,4 +1,5 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
+import { autoMergeDecision, validateRules, type MergePr, type Method, type PolicyLoad } from './merge-rules.js'
 
 // ci-watch: keeps a watch list of pull requests in $.store, polls each one
 // with `gh pr view` on a $.clock timer, and starts a turn ($.prompt.submit)
@@ -26,6 +27,18 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 //   count). At the cap ci-watch stops and stores one decision record.
 // With `off`, ci-watch acts as before the loop (0.2.x).
 //
+// Option `autoMerge` (default true): ci-watch merges the user's own PRs by itself when CI
+// turns green, so nobody types "merge N when green". On green it runs the pure check
+// `autoMergeDecision` (merge-rules.ts): kill switch off, the PR is by you (`gh api user`) and
+// not a draft, CI green and mergeStateStatus CLEAN, no requested changes, no production
+// release, and the merge-policy rule file (~/.claude/merge-policy.json) allows the merge for
+// the repo. All hold: a turn runs the `merge-when-green` steps (squash when the rule allows
+// it, delete the branch); merge-policy still checks the real `gh pr merge` call. One fails:
+// no merge, and a toast and the status line say why (a PR with auto-merge asked for on it
+// gets a turn that says why too). With false, only a PR with auto-merge asked for
+// (`/ci-watch auto-merge <pr> on`, the tool's `auto_merge`) is a candidate, under the same
+// check. `/ci-watch auto-merge <pr> off` keeps one PR out.
+//
 // Kill switch: when ~/.claude/autonomy.off exists, ci-watch starts no turn and
 // says nothing, with either value of `loop`. The event waits: when the file
 // goes, the next poll acts on it.
@@ -39,6 +52,7 @@ type $T = EngineInterface
 // Set from the `fix_turns` and `loop` options when the module loads.
 let fixTurns = true
 let loopOn = true
+let autoMergeOn = true
 /** What the model is told the watch does, for the option's value. */
 const effect = () =>
   fixTurns
@@ -51,7 +65,8 @@ const MAX_MS = 600_000
 const PRUNE_MS = 14 * 24 * 3600 * 1000
 const KEY_PREFIX = 'watch/'
 const PR_FIELDS =
-  'statusCheckRollup,mergeable,mergeStateStatus,state,reviewDecision,url,title,baseRefName,mergeCommit'
+  'statusCheckRollup,mergeable,mergeStateStatus,state,reviewDecision,url,title,baseRefName,mergeCommit,isDraft,author,headRefName,labels'
+const POLICY_FILE = '.claude/merge-policy.json'
 const RUN_FIELDS = 'databaseId,status,conclusion,workflowName,name,url'
 export const MAX_TRIES = 3
 export const DAY_CAP = 60
@@ -72,7 +87,12 @@ type Entry = {
   title?: string
   verdict?: Verdict
   signature?: string
+  /** true: auto-merge asked for on this PR. false: kept out of the option autoMerge. Absent: the option decides. */
   autoMerge?: boolean
+  /** Why ci-watch held back the merge at the last green, for the status line and the list. */
+  hold?: string
+  /** True after ci-watch started the merge turn. */
+  merging?: boolean
   addedAt: number
   checkedAt?: number
   /** Automatic fix turns started for this PR (red CI, conflict, failed deploy), at most MAX_TRIES. */
@@ -129,7 +149,7 @@ type Check = {
   startedAt?: string
 }
 
-type PrView = {
+type PrView = MergePr & {
   statusCheckRollup?: Check[] | null
   mergeable?: string
   mergeStateStatus?: string
@@ -150,6 +170,7 @@ let intervalMs = BASE_MS
 let isTicking = false
 let allowPoll = false
 let lastError: string | undefined
+let myLogin: string | undefined
 
 // ---------- parsing ----------
 
@@ -415,6 +436,11 @@ async function showStatus($: $T) {
   const order = ['red', 'conflict', 'pending', 'green', 'deploying', 'verifying']
   const parts = order.filter(v => counts.has(v)).map(v => `${counts.get(v)} ${v}`)
   let text = `ci ${parts.join(' · ')}`
+  const merges = list
+    .filter(e => e.verdict === 'green' && !e.phase && (e.merging || e.hold))
+    .slice(0, 2)
+    .map(e => (e.merging ? `${label(e)} merging` : `${label(e)} held: ${(e.hold ?? '').slice(0, 60)}`))
+  if (merges.length) text += ` · ${merges.join(' · ')}`
   if (intervalMs > BASE_MS) text += ` · rate-limited, next in ${Math.round(intervalMs / 60_000)}m`
   $.ui.status(text)
 }
@@ -518,7 +544,7 @@ async function startTurn($: $T, text: string): Promise<boolean> {
   return true
 }
 
-function record(e: Entry, kind: string, question: string, options: [string, string], now: number, reversible = true): string {
+function record(e: Pick<Entry, 'repo' | 'number' | 'title'>, kind: string, question: string, options: [string, string], now: number, reversible = true): string {
   const d: DecisionRecord = {
     id: `ci-watch-${e.repo.replace(/[^\w.-]/g, '-')}-${e.number}-${kind}`,
     ticket: ticketOf(e.title),
@@ -532,7 +558,7 @@ function record(e: Entry, kind: string, question: string, options: [string, stri
 }
 
 const nextNote = (text: string) => ` Write \`next\` on the ticket row: "${text.slice(0, 90)}".`
-const needsYou = (e: Entry, rec: string, next: string) =>
+const needsYou = (e: Pick<Entry, 'repo' | 'number' | 'title'>, rec: string, next: string) =>
   ` Write this decision record (one JSON object) in the ticket and in your report: ${rec} Mark the ticket needs-you.${nextNote(next)}`
 
 function fixText(e: Entry, base: string, n: number): string {
@@ -547,14 +573,29 @@ function stopText(e: Entry, why: string, now: number): string {
   )
 }
 
-function mergeText(e: Entry, now: number): string {
+/** The merge turn: every auto-merge rule held, so the model runs the merge-when-green steps now. */
+export function mergeText(e: Pick<Entry, 'repo' | 'number' | 'title'>, method: Method, now: number, loop: boolean): string {
+  const head =
+    `ci-watch: ${label(e)} is green and clean, and every auto-merge rule holds` +
+    ` (your PR, not a draft, mergeStateStatus CLEAN, no requested changes, no production release, merge-policy allows --${method} for ${e.repo}).` +
+    ` Run the \`merge-when-green\` skill steps for it now, with no question to the user:` +
+    ` 1. Read the PR once with \`gh pr view ${e.number} -R ${e.repo} --json isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup\`; if it is no longer green and clean, stop and say why.` +
+    ` 2. Read the repo's CLAUDE.md and AGENTS.md for a merge rule that needs a person; if there is one, stop and name it.` +
+    ` 3. Run exactly \`gh pr merge ${e.number} -R ${e.repo} --${method} --delete-branch\`. merge-policy checks that call.` +
+    ` If merge-policy or a repo rule refuses the merge, the refusal is final: say so, do not retry and do not work around it.`
+  if (!loop) return head
   const rec = record(e, 'merge-refused', `merge-policy or a repo rule refused the merge of ${label(e)}. How to go on?`, ['a person merges it', 'leave it open'], now)
-  return (
-    `ci-watch: ${label(e)} is green and mergeable; merge it per the repo rules. Merge with \`gh pr merge\` only, under merge-policy.` +
-    ` If merge-policy or a repo rule refuses the merge, the refusal is final: say so, do not retry and do not work around it.` +
-    needsYou(e, rec, 'waits for a decision: merge refused') +
-    ` If the merge passes, write \`next\`: "deploy check: ci-watch watches the deploy".`
-  )
+  return head + needsYou(e, rec, 'waits for a decision: merge refused') + ` If the merge passes, write \`next\`: "deploy check: ci-watch watches the deploy".`
+}
+
+/** The turn for a PR with auto-merge asked for on it, when a rule holds the merge back. */
+export function holdText(e: Pick<Entry, 'repo' | 'number' | 'title'>, reasons: readonly string[], now: number, loop: boolean): string {
+  const head =
+    `ci-watch: ${label(e)} is green, but ci-watch does not merge it: ${reasons.join('; ')}.` +
+    ' Do not merge it and do not work around the rule. Say why in one line.'
+  if (!loop) return head
+  const rec = record(e, 'merge-held', `ci-watch held back the merge of ${label(e)}: ${reasons[0] ?? 'a rule failed'}. How to go on?`, ['a person merges it', 'leave it open'], now)
+  return head + needsYou(e, rec, `waits for a decision: merge held (${reasons[0] ?? ''})`)
 }
 
 function verifyText(e: Entry, run: Run): string {
@@ -593,6 +634,72 @@ function closeText(e: Entry, how: 'verified' | 'no-deploy', now: number): string
     ` 2. Run the \`cleanup\` skill rules for this lane: remove its worktree and branch only when they are clean and pushed; keep them otherwise and say why.` +
     ' A production release, a message to other people and a destructive action stay manual: only a decision record.'
   )
+}
+
+// ---------- auto-merge inputs ----------
+
+/** The user's GitHub login, from `gh api user` once per module load. Undefined when gh fails. */
+async function whoAmI($: $T): Promise<string | undefined> {
+  if (myLogin) return myLogin
+  const r = await gh($, ['api', 'user', '--jq', '.login'])
+  const login = r.exitCode === 0 ? r.stdout.trim() : ''
+  if (/^[A-Za-z0-9-]{1,39}$/.test(login)) myLogin = login
+  else lastError = `gh api user failed: ${r.stderr.trim().slice(0, 200)}`
+  return myLogin
+}
+
+/** Reads the merge-policy rule file on each decision, so an edit applies at once. Fails closed. */
+async function loadPolicy($: $T): Promise<PolicyLoad> {
+  const home = await homeDir($)
+  if (!home) return { kind: 'missing' }
+  const path = `${home.replace(/\/+$/, '')}/${POLICY_FILE}`
+  try {
+    if (!(await $.fs.exists(path))) return { kind: 'missing' }
+  } catch {
+    return { kind: 'missing' }
+  }
+  try {
+    const checked = validateRules(JSON.parse(await $.fs.read(path)))
+    return 'rules' in checked ? { kind: 'ok', rules: checked.rules } : { kind: 'bad', error: checked.error }
+  } catch (err) {
+    return { kind: 'bad', error: err instanceof SyntaxError ? 'not valid JSON' : 'cannot read the file' }
+  }
+}
+
+/** True when ci-watch weighs an auto-merge for this PR at green. */
+const isCandidate = (e: Entry) => !e.mergeRefused && (e.autoMerge === true || (autoMergeOn && e.autoMerge !== false))
+
+/** The green step: merge turn, hold turn, or only a toast. False when a turn was held (kill switch, cap). */
+async function greenStep($: $T, e: Entry, pr: PrView, now: number): Promise<boolean> {
+  const name = label(e)
+  if (!isCandidate(e)) {
+    $.ui.toast(`${name} is green`)
+    void $.ui.notify(`${name} is green`, { title: 'ci-watch' }).catch(() => undefined)
+    return true
+  }
+  const killSwitch = await isOff($)
+  const me = await whoAmI($)
+  const d = autoMergeDecision({ repo: e.repo, pr, killSwitch, me, policy: await loadPolicy($) })
+  if (d.merge) {
+    if (!(await startTurn($, mergeText(e, d.method, now, loopOn)))) return false
+    await save($, { ...e, merging: true, hold: undefined })
+    const text = `${name} is green: ci-watch merges it (--${d.method})`
+    $.ui.toast(text)
+    void $.ui.notify(text, { title: 'ci-watch' }).catch(() => undefined)
+    return true
+  }
+  const why = d.reasons.join('; ')
+  // The kill switch and an unknown login pass: the event waits for the next poll, and nothing is said.
+  if (killSwitch || !me) {
+    await save($, { ...e, hold: d.reasons[0] })
+    return false
+  }
+  await save($, { ...e, hold: why })
+  const text = `${name} is green; ci-watch does not merge it: ${why}`
+  $.ui.toast(text.slice(0, 200))
+  void $.ui.notify(text, { title: 'ci-watch' }).catch(() => undefined)
+  if (e.autoMerge === true) return startTurn($, holdText(e, d.reasons, now, loopOn))
+  return true
 }
 
 // ---------- polling ----------
@@ -663,10 +770,13 @@ async function pollOne($: $T, e: Entry): Promise<boolean> {
   }
   const pr = JSON.parse(r.stdout) as PrView
   const { verdict, failed } = verdictOf(pr)
+  // For an auto-merge candidate a green PR acts again when what the merge rules read changes.
   const signature =
     verdict === 'red'
       ? `red:${failed.map(f => `${f.name}@${f.runId ?? ''}`).sort().join(',')}`
-      : verdict
+      : verdict === 'green' && isCandidate(e)
+        ? `green:${pr.mergeStateStatus ?? ''}:${pr.reviewDecision ?? ''}:${pr.isDraft === true ? 'draft' : ''}`
+        : verdict
   const isChanged = signature !== e.signature
   const now = await $.clock.now()
   const next: Entry = {
@@ -677,6 +787,7 @@ async function pollOne($: $T, e: Entry): Promise<boolean> {
     url: pr.url ?? e.url,
     baseRefName: pr.baseRefName ?? e.baseRefName,
     checkedAt: now,
+    ...(verdict === 'green' ? {} : { hold: undefined, merging: undefined }),
   }
   const name = label(e)
 
@@ -708,15 +819,10 @@ async function pollOne($: $T, e: Entry): Promise<boolean> {
     const isStarted = loopOn ? await fixTurn($, next, text, verdict === 'red' ? 'red' : 'in conflict') : await startTurn($, text)
     if (!isStarted) await held()
   } else if (verdict === 'green') {
-    if (e.autoMerge && !e.mergeRefused) {
-      const text = loopOn ? mergeText(next, now) : `ci-watch: ${name} is green and mergeable; merge it per the repo rules.`
-      if (!(await startTurn($, text))) {
-        await held()
-        return true
-      }
+    if (!(await greenStep($, next, pr, now))) {
+      const cur = (await entryOf($, next)) ?? next
+      await save($, { ...cur, signature: e.signature })
     }
-    $.ui.toast(`${name} is green`)
-    void $.ui.notify(`${name} is green`, { title: 'ci-watch' }).catch(() => undefined)
   }
   return true
 }
@@ -755,6 +861,9 @@ async function runCommand($: $T, args: string): Promise<string> {
     const loopLine = loopOn
       ? `loop on: ${day.count} of ${DAY_CAP} automatic turns today${(await isOff($)) ? '; kill switch on (~/.claude/autonomy.off): no turns' : ''}.`
       : 'loop off.'
+    const mergeLine = autoMergeOn
+      ? 'auto-merge on: ci-watch merges your own green, clean PRs under merge-policy (option autoMerge).'
+      : 'auto-merge off: only PRs with auto-merge on (option autoMerge).'
     const rows = list.map(e => {
       const stage = e.phase === 'deploy' ? 'merged, deploy watched' : e.phase === 'verify' ? 'merged, verify turn' : e.phase === 'close' ? 'verified, close turn next' : e.phase === 'handed' ? 'merged, fix in a follow-up PR' : (e.verdict ?? 'not checked yet')
       const notes = [
@@ -762,6 +871,9 @@ async function runCommand($: $T, args: string): Promise<string> {
         ...(e.gaveUp ? ['stopped: needs-you'] : []),
         ...(e.mergeRefused ? ['merge refused'] : []),
         ...(e.autoMerge ? ['auto-merge on'] : []),
+        ...(e.autoMerge === false ? ['auto-merge off'] : []),
+        ...(e.merging ? ['merging'] : []),
+        ...(e.hold && !e.merging ? [`merge held: ${e.hold}`] : []),
       ]
       return `- ${label(e)} ${stage}${notes.length ? ` (${notes.join(', ')})` : ''}${e.title ? ` — ${e.title}` : ''}`
     })
@@ -770,6 +882,7 @@ async function runCommand($: $T, args: string): Promise<string> {
     return [
       head,
       loopLine,
+      mergeLine,
       ...rows,
       ...decisions.map(d => `decision: ${JSON.stringify(d)}`),
       ...(lastError ? [`last error: ${lastError}`] : []),
@@ -829,6 +942,7 @@ async function runCommand($: $T, args: string): Promise<string> {
 export const register: Register = (on, options) => {
   fixTurns = options.fix_turns !== 'off'
   loopOn = options.loop !== 'off'
+  autoMergeOn = options.autoMerge !== false && options.autoMerge !== 'false'
 
   on('session.start', async ($, e, next) => {
     try {
@@ -852,7 +966,11 @@ export const register: Register = (on, options) => {
           properties: {
             pr: { type: 'string', description: 'PR URL, owner/repo#N, or N' },
             cwd: { type: 'string', description: 'Repo directory used to resolve a bare number' },
-            auto_merge: { type: 'boolean', description: 'true: when the PR is green, start a turn that merges it per the repo rules' },
+            auto_merge: {
+              type: 'boolean',
+              description:
+                'true: at green, ci-watch merges it when every auto-merge rule holds (your PR, not a draft, CLEAN, no requested changes, no production release, merge-policy allows it), else a turn says why. false: never auto-merge this PR',
+            },
             follows: {
               type: 'string',
               description: 'The merged PR (owner/repo#N) whose failed deploy this PR fixes: this PR takes over its fix-try count',
@@ -898,7 +1016,10 @@ export const register: Register = (on, options) => {
       }
       if (args.auto_merge === true && entry.autoMerge !== true) {
         await save($, { ...entry, autoMerge: true, signature: entry.verdict === 'green' ? undefined : entry.signature })
-        note += ' Auto-merge is on: a green turn merges it per the repo rules.'
+        note += ' Auto-merge is on: at green ci-watch merges it when the auto-merge rules hold, else a turn says why.'
+      } else if (args.auto_merge === false && entry.autoMerge !== false) {
+        await save($, { ...entry, autoMerge: false })
+        note += ' Auto-merge is off for this PR.'
       }
       return {
         result: `ci-watch ${isNew ? 'now watches' : 'already watches'} ${label(ref)} and ${effect()}.${note} Do not poll CI.`,

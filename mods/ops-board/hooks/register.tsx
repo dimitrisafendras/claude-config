@@ -1,7 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { OpsAgent, OpsBoard, OpsCi, OpsPr, OpsTask, OpsVerdict } from '../types'
+import type { OpsAgent, OpsBoard, OpsCi, OpsLane, OpsPr, OpsTask, OpsVerdict } from '../types'
+import { decisionOf, isCoordinator, isRecentLedger, laneHealth, laneLabel, lastActivity, nextStep, sessionOf, stepText, withDecision } from './lanes'
+import type { LaneMark, LaneSession, Ledger, LedgerLane } from './lanes'
 
 const PANE = 'ops-board'
 const TITLE = 'Ops board'
@@ -13,6 +15,9 @@ const MAX_VIEWS = 10
 const KEEP_ENDED_MS = 30 * 60 * 1000
 const BACKOFF_MIN_MS = 4 * 60 * 1000
 const BACKOFF_MAX_MS = 30 * 60 * 1000
+const LANES_EVERY_MS = 2 * 60 * 1000
+const DEFAULT_SILENT_MIN = 20
+const SESSIONS_SERVER = 'ccd_session_mgmt'
 
 const RATE_LIMIT = /rate limit|secondary rate|abuse detection|submitted too quickly/i
 const ENDED = new Set(['completed', 'failed', 'killed'])
@@ -33,15 +38,26 @@ const EMPTY: OpsBoard = {
   backoffMs: 0,
   isRefreshing: false,
   ci: {},
+  lanes: [],
+  lanesAt: 0,
+  laneError: '',
+  isKillSwitchOn: false,
 }
 
-const board = atom({ plugin: 'ops-board', key: 'board' } as const, EMPTY, { shape: 'board-1' })
+const board = atom({ plugin: 'ops-board', key: 'board' } as const, EMPTY, { shape: 'board-2' })
 
 type $T = EngineInterface
 
 // Module caches: lost on reload, rebuilt on the next refresh.
 let isPrRunning = false
 let lastStatus = ''
+let isLaneRunning = false
+// Set from the `silent_minutes` option when the module loads.
+let silentMs = DEFAULT_SILENT_MIN * 60 * 1000
+// The ids of this session: the engine's and the desktop app's (from get_session "self"), read once.
+let ownIds: string[] | undefined
+// The last row seen for each lane and when it changed: a change is activity.
+const seen = new Map<string, { sig: string; changedAt?: number }>()
 
 function agentState(status: string): 'running' | 'done' | 'failed' {
   if (FAILED.has(status)) return 'failed'
@@ -235,6 +251,137 @@ async function refreshPrs($: $T, force: boolean): Promise<void> {
   }
 }
 
+// ---------- lanes ----------
+
+async function homeOf($: $T): Promise<string | undefined> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+  return home ? home.replace(/\\/g, '/').replace(/\/+$/, '') : undefined
+}
+
+const textOf = (r: { content: readonly { type: string; text?: string }[] }) =>
+  r.content.map(c => (c.type === 'text' && typeof c.text === 'string' ? c.text : '')).join('')
+
+/** The session tools of the desktop app, when this session has them; undefined otherwise. */
+async function sessionInfo($: $T, id: string): Promise<LaneSession | undefined> {
+  try {
+    const r = await $.mcp.call(SESSIONS_SERVER, 'get_session', { session_id: id })
+    return sessionOf(textOf(r), r.isError)
+  } catch {
+    return undefined
+  }
+}
+
+async function idsOfThisSession($: $T): Promise<string[]> {
+  if (ownIds !== undefined) return ownIds
+  const ids: string[] = []
+  try {
+    ids.push(await $.session.id())
+  } catch {
+    // No id from the engine.
+  }
+  try {
+    const r = await $.mcp.call(SESSIONS_SERVER, 'get_session', { session_id: 'self' })
+    const j = JSON.parse(textOf(r)) as { sessionId?: unknown }
+    if (!r.isError && typeof j.sessionId === 'string') ids.push(j.sessionId)
+  } catch {
+    // No desktop app tools: the engine's id only.
+  }
+  ownIds = ids
+  return ids
+}
+
+/** Writes a file whole and moves it into place, so a reader never sees half a file. */
+async function writeAtomic($: $T, path: string, text: string): Promise<void> {
+  const tmp = `${path}.tmp.${await $.clock.now()}.${Math.floor(Math.random() * 1e6)}`
+  await $.fs.write(tmp, text)
+  const mv = await $.process.run(['mv', '-f', tmp, path], { timeoutMs: 5000 })
+  if (mv.exitCode !== 0) throw new Error(`mv failed: ${mv.stderr.trim().slice(0, 120)}`)
+}
+
+async function writeDecision($: $T, home: string, l: LedgerLane, file: string, health: OpsLane['health'], now: number): Promise<string> {
+  const path = `${home}/.claude/autonomy/decisions.json`
+  const old = (await $.fs.exists(path)) ? await $.fs.read(path) : undefined
+  const rec = decisionOf(l, file, health, now)
+  const next = withDecision(old, rec)
+  if (next === undefined) throw new Error('~/.claude/autonomy/decisions.json is not a JSON array; it is left as it is')
+  await writeAtomic($, path, next)
+  return rec.id
+}
+
+async function refreshLanes($: $T): Promise<void> {
+  if (isLaneRunning) return
+  isLaneRunning = true
+  try {
+    const home = await homeOf($)
+    if (!home) throw new Error('HOME and USERPROFILE are not set')
+    const now = await $.clock.now()
+    const isOff = await $.fs.exists(`${home}/.claude/autonomy.off`).catch(() => true)
+    const dir = `${home}/.claude/paralel`
+    const names = (await $.fs.exists(dir)) ? (await $.fs.list(dir)).filter(f => f.kind === 'file' && isRecentLedger(f.name, now)).map(f => f.name).sort() : []
+    const ids = await idsOfThisSession($)
+    const lanes: OpsLane[] = []
+    let startedTurn = false
+    let error = ''
+    for (const file of names) {
+      let ledger: Ledger
+      try {
+        ledger = JSON.parse(await $.fs.read(`${dir}/${file}`)) as Ledger
+      } catch {
+        error = `${file} does not parse`
+        continue
+      }
+      const isMine = isCoordinator(ledger.coordinator, ids)
+      for (const l of Array.isArray(ledger.lanes) ? ledger.lanes : []) {
+        const key = `${file}#${l.lane ?? '?'}`
+        const sig = JSON.stringify(l)
+        const was = seen.get(key)
+        const changedAt = was === undefined ? undefined : was.sig !== sig ? now : was.changedAt
+        seen.set(key, { sig, ...(changedAt !== undefined ? { changedAt } : {}) })
+        const state = typeof l.state === 'string' ? l.state : ''
+        const first = laneHealth(l, lastActivity(l, ledger, undefined, changedAt), now, silentMs)
+        // Ask the session tools only for a lane that is not done: it may be active, archived or gone.
+        const session = first.health === 'done' || typeof l.session !== 'string' ? undefined : await sessionInfo($, l.session)
+        const { health, why } = session === undefined ? first : laneHealth(l, lastActivity(l, ledger, session, changedAt), now, silentMs, session)
+        const row: OpsLane = { key, file, lane: l.lane ?? '?', label: laneLabel(l), state, health, why, isMine }
+        const markKey = `lane/${key}`
+        const mark = ((await $.store.get(markKey)) as LaneMark | undefined) ?? {}
+        if (mark.decidedAt !== undefined) row.done = 'decision written'
+        else if (mark.restartAt !== undefined) row.done = 'restart asked'
+        else if (mark.checkAt !== undefined) row.done = 'check asked'
+        const step = nextStep(health, mark, l.restarts, now, silentMs)
+        // Turns start only in the coordinator, one step for each refresh, and never with the kill switch on.
+        if (step !== undefined && isMine && !isOff && !startedTurn) {
+          if (step === 'decide') {
+            try {
+              const id = await writeDecision($, home, l, file, health, now)
+              await $.store.set(markKey, { ...mark, decidedAt: now })
+              row.done = 'decision written'
+              $.ui.toast(`ops-board: ${row.label} is still ${health} after one check and one restart. Decision record ${id} is in ~/.claude/autonomy/decisions.json.`)
+            } catch (err) {
+              error = err instanceof Error ? err.message : String(err)
+            }
+          } else {
+            await $.store.set(markKey, step === 'check' ? { ...mark, checkAt: now } : { ...mark, restartAt: now })
+            row.done = step === 'check' ? 'check asked' : 'restart asked'
+            startedTurn = true
+            await $.prompt.submit({ text: stepText(step, l, file, health, why) })
+          }
+        }
+        lanes.push(row)
+      }
+    }
+    await update($, board, b => ({ ...b, lanes, lanesAt: now, laneError: error, isKillSwitchOn: isOff }))
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    await update($, board, b => ({ ...b, laneError: error })).catch(() => undefined)
+  } finally {
+    isLaneRunning = false
+    await pushStatus($)
+  }
+}
+
+const sickLanes = (b: OpsBoard) => b.lanes.filter(l => l.health === 'silent' || l.health === 'dead')
+
 function counts(b: OpsBoard) {
   const byVerdict = new Map<OpsVerdict, number>()
   for (const pr of b.prs) byVerdict.set(pr.verdict, (byVerdict.get(pr.verdict) ?? 0) + 1)
@@ -245,7 +392,8 @@ function counts(b: OpsBoard) {
 
 export function statusLine(b: OpsBoard): string {
   const { byVerdict, running, failed } = counts(b)
-  const agents = `agents ${running}${failed > 0 ? ` (${failed} failed)` : ''}`
+  const sick = sickLanes(b).length
+  const agents = `agents ${running}${failed > 0 ? ` (${failed} failed)` : ''}${sick > 0 ? ` · lanes ${sick} need a check` : ''}`
   if (b.prsAt === 0) return `${agents} · PR …`
   const parts = VERDICT_ORDER.filter(v => v !== 'old' && (byVerdict.get(v) ?? 0) > 0).map(
     v => `${byVerdict.get(v)} ${v === 'changes-requested' ? 'changes' : v}`,
@@ -303,13 +451,19 @@ export function summary(b: OpsBoard, now: number): string {
       lines.push(`- ${v}: ${group.map(p => `[${p.repo.split('/')[1]}#${p.number}](${p.url})`).join(', ')}`)
     }
   }
+  if (b.lanes.length > 0) {
+    lines.push(`**Lanes** (paralel ledgers, read ${age(now - b.lanesAt)} ago${b.isKillSwitchOn ? '; kill switch on: no turns' : ''})`)
+    for (const l of b.lanes) lines.push(`- ${l.health} ${l.label}: ${l.why}${l.done ? ` (${l.done})` : ''}`)
+  }
   const need = needsYou(b)
-  if (need.prs.length + need.agents.length === 0) {
+  const sick = sickLanes(b)
+  if (need.prs.length + need.agents.length + sick.length === 0) {
     lines.push('**Needs you**: nothing')
   } else {
     lines.push('**Needs you**')
     for (const p of need.prs) lines.push(`- ${p.verdict}: [${p.repo}#${p.number}](${p.url}) ${p.title}`)
     for (const a of need.agents) lines.push(`- agent ${a.status}: ${a.label} (${a.type})`)
+    for (const l of sick) lines.push(`- lane ${l.health}: ${l.label}`)
   }
   return lines.join('\n')
 }
@@ -324,7 +478,10 @@ const VERDICT_COLOR: Record<OpsVerdict, 'error' | 'warning' | 'success' | 'inact
   old: 'inactive',
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const minutes = Number(options.silent_minutes)
+  silentMs = (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_SILENT_MIN) * 60 * 1000
+
   on('session.start', async ($, e, next) => {
     // /status and /doctor are Claude Code's own names: $.command.register refuses them.
     await $.command
@@ -338,8 +495,11 @@ export const register: Register = on => {
       $.clock.every(PR_EVERY_MS, () => {
         void refreshPrs($, false)
       })
+      $.clock.every(LANES_EVERY_MS, () => {
+        void refreshLanes($)
+      })
       $.clock.after(1500, () => {
-        void refreshAgents($).then(() => refreshPrs($, false))
+        void refreshAgents($).then(() => refreshLanes($)).then(() => refreshPrs($, false))
       })
     } catch {
       // The board stays empty; /ops-status says so.
@@ -350,6 +510,7 @@ export const register: Register = on => {
   on('command.run', { command: 'ops-status' }, async $ => {
     try {
       await refreshAgents($)
+      await refreshLanes($)
       if ((await read($, board)).prsAt === 0) await refreshPrs($, false)
       await pushStatus($)
       return { text: summary(await read($, board), await $.clock.now()) }
@@ -429,7 +590,12 @@ export const register: Register = on => {
         </Box>
 
         <Text bold>Needs you</Text>
-        {need.prs.length + need.agents.length === 0 && <Text dimColor>nothing</Text>}
+        {need.prs.length + need.agents.length + sickLanes(b).length === 0 && <Text dimColor>nothing</Text>}
+        {sickLanes(b).map(l => (
+          <Text key={`needlane:${l.key}`} color={l.health === 'dead' ? 'error' : 'warning'}>
+            {clip(`lane ${l.health}: ${l.label}`, width)}
+          </Text>
+        ))}
         {need.prs.map(p => (
           <Button key={`need:${p.repo}#${p.number}`} plain onPress={press => copy(p.url, press.surface)}>
             <Text color={VERDICT_COLOR[p.verdict]}>{p.verdict}</Text> {clip(`${p.repo.split('/')[1]}#${p.number} ${p.title}`, width - p.verdict.length - 2)}
@@ -438,6 +604,20 @@ export const register: Register = on => {
         {need.agents.map(a => (
           <Text color="error">
             {clip(`agent ${a.status}: ${a.label} (${a.type})`, width)}
+          </Text>
+        ))}
+
+        <Text bold>Lanes</Text>
+        {b.lanes.length === 0 && <Text dimColor>{b.lanesAt === 0 ? 'not read yet' : 'none in the paralel ledgers of today and yesterday'}</Text>}
+        {b.isKillSwitchOn && b.lanes.length > 0 && <Text color="warning">kill switch on (~/.claude/autonomy.off): no turns</Text>}
+        {b.laneError !== '' && <Text color="warning">{clip(b.laneError, width)}</Text>}
+        {b.lanes.map(l => (
+          <Text
+            key={`lane:${l.key}`}
+            dimColor={l.health === 'done'}
+            color={l.health === 'dead' ? 'error' : l.health === 'silent' ? 'warning' : undefined}
+          >
+            {clip(`${l.health.padEnd(7)} ${l.label} · ${l.why}${l.done ? ` · ${l.done}` : ''}${l.isMine ? '' : ' · not this coordinator'}`, width)}
           </Text>
         ))}
 

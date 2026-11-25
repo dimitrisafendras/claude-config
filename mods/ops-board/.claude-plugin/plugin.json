@@ -1,12 +1,20 @@
 {
   "name": "ops-board",
-  "version": "0.1.0",
-  "description": "One answer to 'status?': a pane, /status and a status line with agents, background tasks and your open PRs with CI verdicts.",
+  "version": "0.2.0",
+  "description": "One answer to 'status?': a pane, /ops-status and a status line with agents, background tasks, your open PRs with CI verdicts, and lane health. A paralel lane that is silent or dead gets one check turn and one restart turn in its coordinator session, then a decision record in ~/.claude/autonomy/decisions.json; no turn while ~/.claude/autonomy.off exists.",
   "author": {
     "name": "claude-config"
   },
   "engines": {
     "claude-code": ">=2.1.289"
   },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "silent_minutes": {
+      "type": "number",
+      "title": "Silent lane limit (minutes)",
+      "description": "A lane whose ledger state is running and that shows no activity for this many minutes is silent: ops-board asks the coordinator for one check, then one restart.",
+      "default": 20
+    }
+  }
 }

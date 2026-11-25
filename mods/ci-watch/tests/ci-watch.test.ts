@@ -15,6 +15,9 @@ const RED = {
   url: 'https://github.com/o/r/pull/5',
   title: 'Fix it',
   baseRefName: 'main',
+  headRefName: 'feat',
+  isDraft: false,
+  author: { login: 'me' },
   statusCheckRollup: [
     {
       __typename: 'CheckRun',
@@ -26,7 +29,7 @@ const RED = {
     { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
   ],
 }
-const GREEN = { ...RED, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] }
+const GREEN = { ...RED, mergeStateStatus: 'CLEAN', statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] }
 const PENDING = { ...RED, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS' }] }
 
 const CONFLICT = { ...GREEN, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }
@@ -42,7 +45,15 @@ type World = {
   off: boolean
   /** What a Bash call beneath the plugin answers. */
   bash: Record<string, unknown>
+  /** The login `gh api user` gives; undefined: gh fails. */
+  me: string | undefined
+  /** The merge-policy rule file ~/.claude/merge-policy.json; undefined: no file. */
+  policy: unknown
 }
+
+/** A rule file that lets ci-watch squash-merge in o/r. */
+const POLICY = { repos: { 'o/r': { method: ['merge', 'squash'], admin: false, requireApproval: false } }, requireGreen: true, allowAdmin: false }
+const POLICY_PATH = '/home/me/.claude/merge-policy.json'
 
 function world(on: On, opts: { now?: number; store?: Record<string, unknown> } = {}): World {
   const w: World = {
@@ -54,10 +65,18 @@ function world(on: On, opts: { now?: number; store?: Record<string, unknown> } =
     gh: { pr: RED, runs: [], rateLimited: false, calls: [] },
     off: false,
     bash: { result: { stdout: 'ok', stderr: '', interrupted: false } },
+    me: 'me',
+    policy: POLICY,
   }
   mock.store(on, opts.store)
   mock.env(on, { HOME: '/home/me' })
-  on('fs.exists', (_, e) => ({ value: w.off && e.path === '/home/me/.claude/autonomy.off' }))
+  on('fs.exists', (_, e) => ({
+    value: (w.off && e.path === '/home/me/.claude/autonomy.off') || (w.policy !== undefined && e.path === POLICY_PATH),
+  }))
+  on('fs.read', (_, e) => {
+    if (w.policy === undefined || e.path !== POLICY_PATH) throw new Error('ENOENT')
+    return { value: JSON.stringify(w.policy) }
+  })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -88,6 +107,7 @@ function world(on: On, opts: { now?: number; store?: Record<string, unknown> } =
     let r: Gh
     if (w.gh.rateLimited) r = { exitCode: 1, stdout: '', stderr: 'HTTP 403: API rate limit exceeded' }
     else if (argv[1] === 'run' && argv[2] === 'list') r = ok(w.gh.runs)
+    else if (argv[1] === 'api' && argv[2] === 'user') r = w.me ? { exitCode: 0, stdout: `${w.me}\n`, stderr: '' } : { exitCode: 1, stdout: '', stderr: 'no auth' }
     else if (argv.includes('-R')) r = ok(w.gh.pr)
     else if (argv[3] === '--json' && argv[4]?.includes('headRefName')) r = ok({ number: 5, url: 'https://github.com/o/r/pull/5', headRefName: 'feat' })
     else r = ok({ number: 5, url: 'https://github.com/o/r/pull/5' })
@@ -121,7 +141,7 @@ test('add, then a red check starts a turn with the failed check and run id', asy
   expect(w.prompts.length).toBe(1)
 })
 
-test('green notifies without a turn; auto-merge on asks to merge', { options: { loop: 'off' } }, async ($, on) => {
+test('autoMerge false: green notifies without a turn; auto-merge on asks to merge', { options: { loop: 'off', autoMerge: false } }, async ($, on) => {
   const w = world(on)
   w.gh.pr = GREEN
   await $.session.start(START)
@@ -134,7 +154,9 @@ test('green notifies without a turn; auto-merge on asks to merge', { options: { 
   await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 on', ...RUN })
   await $.command.run({ command: 'ci-watch', args: 'check', ...RUN })
   await w.clock.advance(1)
-  expect(w.prompts[0]).toBe('ci-watch: o/r#5 is green and mergeable; merge it per the repo rules.')
+  expect(w.prompts[0]).toContain('ci-watch: o/r#5 is green and clean, and every auto-merge rule holds')
+  expect(w.prompts[0]).toContain('`gh pr merge 5 -R o/r --squash --delete-branch`')
+  expect(w.prompts[0]).not.toContain('decision record')
 })
 
 test('a sleep-poll loop is denied and the PR is watched; allow-poll lets it run', async ($, on) => {
@@ -235,7 +257,7 @@ test('fix_turns off: a conflict gets a toast and a notification, and no turn', {
   expect(w.notes).toEqual(['o/r#5 has merge conflicts'])
 })
 
-test('fix_turns off: the green path does not change', { options: { fix_turns: 'off', loop: 'off' } }, async ($, on) => {
+test('fix_turns off: the green path does not change', { options: { fix_turns: 'off', loop: 'off', autoMerge: false } }, async ($, on) => {
   const w = world(on)
   w.gh.pr = GREEN
   await $.session.start(START)
@@ -247,7 +269,8 @@ test('fix_turns off: the green path does not change', { options: { fix_turns: 'o
 
   await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 on', ...RUN })
   await check($, w)
-  expect(w.prompts).toEqual(['ci-watch: o/r#5 is green and mergeable; merge it per the repo rules.'])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('Run the `merge-when-green` skill steps for it now')
 })
 
 test('the watch tool can switch auto-merge on for the PR', async ($, on) => {
@@ -378,8 +401,8 @@ test('loop: the merge turn obeys merge-policy; a refused merge gets a decision r
   await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 on', ...RUN })
   await check($, w)
   expect(w.prompts.length).toBe(1)
-  expect(w.prompts[0]).toContain('ci-watch: o/r#5 is green and mergeable; merge it per the repo rules.')
-  expect(w.prompts[0]).toContain('under merge-policy')
+  expect(w.prompts[0]).toContain('ci-watch: o/r#5 is green and clean, and every auto-merge rule holds')
+  expect(w.prompts[0]).toContain('merge-policy checks that call')
   expect(w.prompts[0]).toContain('the refusal is final')
 
   w.bash = { deny: 'merge-policy: o/r#5 not merged: review required' }
@@ -497,4 +520,98 @@ test('loop off: a merged PR leaves the list, as before', { options: { loop: 'off
   expect(w.toasts).toContain('o/r#5 is merged; ci-watch stopped watching it')
   expect(await list($)).toContain('0 PR(s) watched')
   expect(w.gh.calls.some(c => c[1] === 'run')).toBe(false)
+})
+
+// ---------- auto-merge of your own PRs (option autoMerge, default true) ----------
+
+test('autoMerge: your green, clean PR starts the merge turn with no ask, a toast and a status line', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = GREEN
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('Run the `merge-when-green` skill steps for it now, with no question to the user')
+  expect(w.prompts[0]).toContain('`gh pr merge 5 -R o/r --squash --delete-branch`')
+  expect(w.prompts[0]).toContain('Mark the ticket needs-you.')
+  expect(w.toasts).toContain('o/r#5 is green: ci-watch merges it (--squash)')
+  expect(w.statuses.at(-1)).toBe('ci 1 green · o/r#5 merging')
+  expect(await list($)).toContain('auto-merge on: ci-watch merges your own green, clean PRs')
+
+  // The same state starts no second merge turn.
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+})
+
+test('autoMerge: a draft, a PR of someone else, a block and requested changes only get a toast', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  w.gh.pr = { ...GREEN, isDraft: true }
+  await check($, w)
+  expect(w.toasts.at(-1)).toContain('o/r#5 is green; ci-watch does not merge it: the PR is a draft')
+  expect(w.statuses.at(-1)).toContain('o/r#5 held: the PR is a draft')
+  w.gh.pr = { ...GREEN, author: { login: 'someone' } }
+  await check($, w)
+  expect(w.toasts.at(-1)).toContain('the PR is by @someone, not by you')
+  w.gh.pr = { ...GREEN, mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED' }
+  await check($, w)
+  expect(w.toasts.at(-1)).toContain('mergeStateStatus is BLOCKED, not CLEAN; a reviewer requested changes')
+  expect(w.prompts).toEqual([])
+
+  // The block goes: the merge turn starts.
+  w.gh.pr = GREEN
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('every auto-merge rule holds')
+})
+
+test('autoMerge: no merge-policy rule for the repo, or a production release, holds the merge', async ($, on) => {
+  const w = world(on)
+  w.policy = undefined
+  w.gh.pr = GREEN
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.toasts.at(-1)).toContain('there is no merge-policy rule file')
+  expect(w.prompts).toEqual([])
+
+  // An explicit auto-merge on a release PR: a turn says why, with a decision record.
+  w.policy = POLICY
+  w.gh.pr = { ...GREEN, baseRefName: 'production' }
+  await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 on', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('ci-watch: o/r#5 is green, but ci-watch does not merge it')
+  expect(w.prompts[0]).toContain('production release')
+  expect(w.prompts[0]).toContain('Do not merge it')
+  expect(w.prompts[0]).toContain('"id":"ci-watch-o-r-5-merge-held"')
+})
+
+test('autoMerge: the kill switch holds the merge in silence, and the merge runs when it goes', async ($, on) => {
+  const w = world(on)
+  w.off = true
+  w.gh.pr = GREEN
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.prompts).toEqual([])
+  expect(w.toasts).toEqual([])
+  expect(w.statuses.at(-1)).toContain('o/r#5 held: the kill switch')
+
+  w.off = false
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('every auto-merge rule holds')
+})
+
+test('autoMerge: /ci-watch auto-merge <pr> off keeps one PR out', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = GREEN
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 off', ...RUN })
+  await check($, w)
+  expect(w.prompts).toEqual([])
+  expect(w.toasts).toEqual(['o/r#5 is green'])
+  expect(await list($)).toContain('(auto-merge off)')
 })

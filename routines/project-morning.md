@@ -12,16 +12,20 @@ This is a template. One scheduled task per project uses it. The scheduled task g
 You run alone. Nobody watches. Prepare the day of PROJECT, then start the work that is safe to start.
 
 Hard rules:
-- Limits: at most 60 tool calls and 45 minutes for this session. At a limit, stop, write the report with what you have, and say which limit stopped you. The sessions that the dispatcher starts have their own limits.
+- Limits: at most 60 tool calls and 45 minutes. At a limit, stop, write the report with what you have, and say which limit stopped you. Never go on past a limit to finish.
+- The limits are for this session. The sessions that the dispatcher starts have their own limits.
 - Touch only PROJECT. Do not fetch, clean or read the inbox of another project.
-- Run stage 1 (housekeeping) and stage 2 (inbox) of the `start-work` skill in the scope of PROJECT, then the dispatch of step 5. Do not run the stage 3 question: nobody answers it. Do not run the setup drift checks.
-- The dispatcher is the skill that the `Dispatcher` line of a source file of PROJECT names, else `paralel`. The cleanup skill comes from the same file in the same way, else `cleanup`.
+- Run stage 1 (housekeeping) and stage 2 (inbox) of the `start-work` skill in the scope of PROJECT, then the dispatch of step 5. Do not run the stage 3 question: nobody answers it.
+- Do not run the setup drift checks: the all-projects routine does them.
+- The dispatcher is the skill that the `Dispatcher` line of a source file of PROJECT names, else `paralel`.
+- The cleanup step uses the cleanup skill that a source file of PROJECT names, else `cleanup`, limited to PROJECT, and follows that skill's rules and nothing more.
 - Start only tickets that are ready: assigned to the user, not marked `needs-you`, not `blocked`, not `in review`, not waiting for a person, and with no open decision record. Never start a needs-you or blocked ticket, also when its source says it is urgent.
 - Start no more sessions than the memory room allows: run `bash ~/.claude/mem-budget.sh` before each start, and stop at its first "wait" (exit 1). Queue the rest.
 - Do not merge, push to a default branch, delete, or close anything in this session. The started sessions follow the dispatcher rules: merges on green only under the merge policy, at most 3 automatic fix tries per PR, then needs-you with a decision record.
 - A production release, a message to other people, money, secrets, sign-ins and destructive data actions are never done by a loop. Each one becomes a decision record (`routines/README.md` has the format) and a `needsYou` line.
 - Follow the ticket rules of the source files of PROJECT (ticket id, PR title, no AI attribution where a source says so).
-- Do not ask questions. If a source fails, skip it, say so, and continue. A denied tool call is not a failure: write it in the report and go on, or stop on doubt.
+- Do not ask questions. If a source fails (an extra source or `gh`), skip it, say so, and continue.
+- A denied tool call is not a failure: write it in the report with the command, and go on or stop on doubt.
 
 Steps:
 1. Stage 1: `bash ~/.claude/skills/start-work/morning.sh PROJECT`. Then cleanup in the background and the connection checks of the sources of PROJECT (the files in `~/.claude/start-work.d/` with the line `Project: PROJECT`, and the files with no `Project:` line).

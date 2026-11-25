@@ -15,6 +15,21 @@ const CACHE_LIMIT = 200
 const ACK = /^(y(es|ep|eah|up)?|ok(ay)?|sure|continue|go( on| ahead)?|proceed|thanks?( you)?|thx|do it|sounds good|lgtm|yes please|please do|next|keep going|carry on|fine|great|cool|done|no|nope)[\s.!?]*$/i
 const TYPED = new Set(['composer', 'bridge', 'sdk'])
 
+/**
+ * Intent gates: a skill named here is a candidate only when the prompt has one of its words.
+ * A broad description ("audit the repo") makes the classify call pick the skill for any
+ * "improve" or "ideas" question; the gate keeps it to the requests it is for.
+ */
+const INTENT_GATES: Record<string, RegExp> = {
+  'setup-audit': /\b(audit\w*|check\w*|health\w*|drift\w*|verif\w*)\b/i,
+}
+
+/** True when the skill has no intent gate, or the prompt passes its gate. */
+export function passesGate(skillName: string, text: string): boolean {
+  const gate = INTENT_GATES[bareName(skillName)]
+  return gate === undefined || gate.test(text)
+}
+
 // Index and session memory. Reset at session.start.
 const mem = {
   enabled: true,
@@ -161,7 +176,8 @@ function withTimeout<T>($: $, work: Promise<T>, ms: number): Promise<T | undefin
 
 type Pick = { skill: SkillEntry; how: string; detail: string }
 
-async function choose($: $, text: string, pool: SkillEntry[]): Promise<{ pick?: Pick; how: string; detail?: string }> {
+async function choose($: $, text: string, all: SkillEntry[]): Promise<{ pick?: Pick; how: string; detail?: string }> {
+  const pool = all.filter(s => passesGate(s.name, text))
   if (pool.length === 0) return { how: 'no skills to suggest' }
   const lower = text.toLowerCase()
   const hits = pool

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ThemeSetArgs } from 'claude-code'
 
-import { THEMES, retakeBudget, themeOf } from './themes'
+import { THEMES, otherOwner, retakeBudget, themeOf } from './themes'
 import type { Theme } from './themes'
 import type { Choice } from '../types'
 
@@ -62,6 +62,7 @@ async function setLook($: $, theme: Theme): Promise<string> {
 
 /** Applies a theme (or none) and keeps the choice: in the store for all projects (one file for the user), or in the session state only. */
 async function apply($: $, theme: Theme | undefined, forAll: boolean): Promise<string> {
+  hasYielded = false
   if (theme === undefined) {
     if (forAll) await $.store.set(STORE_KEY, 'none')
     const scope: Choice['scope'] = forAll ? undefined : 'session'
@@ -167,6 +168,13 @@ function card($: $, { Box, Text, Button }: CardElements, now: Choice) {
   )
 }
 
+// One theme owner. Another plugin that sets or clears the theme is seen by the origin of its call (`next.origin`).
+// When one is seen by the end of the session start, this mod refuses to be the second owner: it says so in a toast
+// and sets no theme in this session, and it does not take the theme back. A theme the person picks later with
+// /themes or the card applies all the same (the person's ask wins).
+let otherThemeOwner: string | undefined
+let hasYielded = false
+
 const RETAKE_DELAY_MS = 250
 // The number of takes in a minute is limited (`retakeBudget`): a mod that sets its theme again and again must not start a fight with no end.
 let retakeAt: number[] = []
@@ -183,6 +191,7 @@ async function retake($: $): Promise<void> {
   retaking = $.clock.after(RETAKE_DELAY_MS, async () => {
     retaking = undefined
     try {
+      if (hasYielded) return
       const now = await read($, choice)
       if (now.preview !== undefined) return
       const theme = themeOf(now.applied)
@@ -205,33 +214,46 @@ async function retake($: $): Promise<void> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // The other plugins start first, so a theme that one of them sets at its start is seen before this mod sets one.
+    const started = await next(e)
     try {
       await $.command.register({
         name: COMMAND,
         description: 'Custom themes of this setup: a card to pick one. Add a name to apply it, "list" to see all, "off" to clear, "preview <name>" for a look.',
         argumentHint: '[<name> [session] | list | off | preview <name>]',
       })
-      // A theme does not stay through a reload or --resume, so set it at each start.
-      await startTheme($)
+      // A theme does not stay through a reload or --resume, so set it at each start, unless another plugin owns it.
+      if (otherThemeOwner !== undefined) {
+        hasYielded = true
+        $.ui.toast(`custom-themes: the plugin ${otherThemeOwner} also sets the theme, so custom-themes sets none in this session (one theme owner). Turn one of them off, or pick a theme with /themes.`)
+      } else {
+        await startTheme($)
+      }
       await refresh($)
       // No event says that the person ran /clear, so the fill is also read on a slow timer.
       $.clock.every(30_000, () => refresh($))
     } catch {
       // The look is decoration. A failure must not stop the session.
     }
-    return next(e)
+    return started
   })
 
   // A theme set or cleared by another mod: take the applied theme back (see `retake`). The call of the other mod goes on.
   // One hook for each event, each with its own literal name.
   on('theme.set', async ($, e, next) => {
     const result = await next(e)
-    if (ownCalls === 0) await retake($)
+    if (ownCalls === 0) {
+      otherThemeOwner = otherOwner(next.origin, PLUGIN) ?? otherThemeOwner
+      await retake($)
+    }
     return result
   }).catch(($, e, next) => next(e))
   on('theme.clear', async ($, e, next) => {
     const result = await next(e)
-    if (ownCalls === 0) await retake($)
+    if (ownCalls === 0) {
+      otherThemeOwner = otherOwner(next.origin, PLUGIN) ?? otherThemeOwner
+      await retake($)
+    }
     return result
   }).catch(($, e, next) => next(e))
 
