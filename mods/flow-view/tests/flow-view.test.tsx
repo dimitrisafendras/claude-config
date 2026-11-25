@@ -343,3 +343,25 @@ test('a group folds, and a ticket shows its steps, its time and the part of the 
   expect(await ui.find({ type: 'Text', text: /Time: not measured/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('the Prompts tab counts the prompts that the person typed, keeps them, and fills the chat input', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  for (const text of ['Merge PR 12', 'merge pr 13', 'Fix the login']) {
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    await clock.advance(1000)
+  }
+  await $.prompt.submit({ text: 'ci: PR 7 is red', wait: false, origin: { kind: 'plugin' } })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-prompts' })
+  expect(await ui.find({ type: 'Text', text: /3 prompts · 2 different · 1 said again/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /33% of your prompts repeat/ })).toBeDefined()
+  FILLED.length = 0
+  const make = (await ui.findAll({ type: 'Button' })).find(b => String(b.props.key).startsWith('auto-'))
+  await ui.press({ key: String(make?.props.key) })
+  expect(FILLED[0]).toMatch(/^replace:I said this 2 times: "merge pr 13"/)
+  await ui.press({ key: 'once' })
+  expect(await ui.find({ type: 'Text', text: /1x Fix the login/ })).toBeDefined()
+  await ui.unmount()
+})

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Board, Call, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
+import type { Board, Call, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
 
 const PANE = 'flow-view'
 const MAIN = 'main'
@@ -25,6 +25,7 @@ const view = atom(
   { tab: 'tickets', filter: 'all', session: '', ticket: '', live: false } as View,
   { shape: 'view-6' },
 )
+const typed = atom({ plugin: 'flow-view', key: 'typed' } as const, [] as Said[], { shape: 'typed-1' })
 const board = atom(
   { plugin: 'flow-view', key: 'board' } as const,
   { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 } as Board,
@@ -1173,6 +1174,68 @@ export function sortTickets(list: Ticket[]): Ticket[] {
   return [...list].sort((a, b) => rank(a) - rank(b) || (a.n ?? 999) - (b.n ?? 999))
 }
 
+
+// ---------- the prompts of the person, counted (pure) ----------
+
+const PROMPTS_KEY = 'prompts'
+const MAX_SAID = 400
+const MAX_SAID_TEXT = 240
+
+/**
+ * What a prompt means, in one key: lower case, one space between words, and a number, a link or a quoted name
+ * replaced by a mark. "Merge PR 12" and "merge pr 13" are the same prompt, and so are two prompts that differ only
+ * in the name of a ticket.
+ */
+export function promptKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '<link>')
+    .replace(/"[^"]*"|`[^`]*`/g, '<name>')
+    .replace(/\b[a-z]{1,6}-\d+\b/g, '<id>')
+    .replace(/#?\d+/g, '<n>')
+    .replace(/[^\p{L}\p{N}<>/ ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300)
+}
+
+/** One more prompt at `at`. The list is the same list with that prompt counted, and the oldest single prompts leave when it is full. */
+export function countPrompt(list: Said[], text: string, at: number): Said[] {
+  const key = promptKey(text)
+  if (key === '') return list
+  const shown = text.trim().replace(/\s+/g, ' ').slice(0, MAX_SAID_TEXT)
+  const i = list.findIndex(s => s.key === key)
+  if (i >= 0) return list.map((s, j) => (j === i ? { ...s, n: s.n + 1, last: at, text: shown } : s))
+  const next = [...list, { key, text: shown, n: 1, first: at, last: at }]
+  if (next.length <= MAX_SAID) return next
+  const drop = next.findIndex(s => s.n === 1)
+
+  return next.filter((_, j) => j !== (drop >= 0 ? drop : 0))
+}
+
+export type PromptReport = { total: number; unique: number; repeated: Said[]; once: Said[]; share: number; since: number }
+
+/** The count of the prompts: the ones said more than once (most often first), the ones said once, and the share that is a repeat. */
+export function reportPrompts(list: Said[]): PromptReport {
+  const total = list.reduce((n, s) => n + s.n, 0)
+  const repeated = list.filter(s => s.n > 1).sort((a, b) => b.n - a.n || b.last - a.last)
+  const once = list.filter(s => s.n === 1).sort((a, b) => b.last - a.last)
+  const extra = repeated.reduce((n, s) => n + s.n - 1, 0)
+
+  return { total, unique: list.length, repeated, once, share: total === 0 ? 0 : Math.round((extra / total) * 100), since: list.reduce((m, s) => (m === 0 || s.first < m ? s.first : m), 0) }
+}
+
+/** The text that asks for a skill for a prompt that came back. It goes in the chat input. */
+export function automateText(s: Said): string {
+  return `I said this ${s.n} times: "${s.text}". Make a skill or a command that does it, and tell me how to start it.`
+}
+
+async function loadPrompts($: EngineInterface): Promise<Said[]> {
+  const kept = await safeGet($, PROMPTS_KEY)
+
+  return Array.isArray(kept) ? (kept as Said[]).filter(s => typeof s?.key === 'string' && typeof s.n === 'number') : []
+}
+
 /** A short mark for the CI of a ticket. */
 // ---------- the ticket list as a report (pure) ----------
 
@@ -1477,14 +1540,14 @@ export function demoBoard(tick: number, start: number): Board {
 
 // ---------- the /flow command ----------
 
-export const FLOW_HELP = 'Use /flow [tickets | sessions | status | clear | demo | help].'
+export const FLOW_HELP = 'Use /flow [tickets | sessions | prompts | status | clear | demo | help].'
 
 async function flowCommand($: EngineInterface, raw: string): Promise<string> {
   const arg = raw.trim().toLowerCase()
   if (arg === '') return 'Workflow pane opened.'
   if (arg === 'demo') return toggleDemo($)
-  if (arg === 'tickets' || arg === 'sessions') {
-    const tab: View['tab'] = arg === 'tickets' ? 'tickets' : 'sessions'
+  if (arg === 'tickets' || arg === 'sessions' || arg === 'prompts') {
+    const tab: View['tab'] = arg
     await update($, view, w => ({ ...w, tab }))
 
     return `Workflow pane shows ${arg}.`
@@ -1524,10 +1587,12 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'flow',
-      description: 'Show the runs, steps and agents in a live pane. tickets | sessions | status | clear | demo | help',
-      argumentHint: 'tickets | sessions | status | clear | demo | help',
+      description: 'Show the runs, steps and agents in a live pane. tickets | sessions | prompts | status | clear | demo | help',
+      argumentHint: 'tickets | sessions | prompts | status | clear | demo | help',
     })
     void $.ui.open({ id: PANE, title: 'Workflow' })
+    await update($, typed, () => [])
+    void loadPrompts($).then(list => update($, typed, () => list))
     $.clock.every(3000, () => refresh($))
     void refresh($)
 
@@ -1600,6 +1665,9 @@ export const register: Register = on => {
         const before = (await read($, flow)).me?.mineMs ?? 0
         const after = await update($, flow, f => ({ ...f, me: said(f.me, at) }))
         await shareWithTickets($, (after.me?.mineMs ?? 0) - before, at)
+        const counted = countPrompt(await loadPrompts($), e.text, at)
+        await $.store.set(PROMPTS_KEY, counted)
+        await update($, typed, () => counted)
       }
     } catch {
       // The time count is a view only: a prompt always goes through.
@@ -1717,6 +1785,13 @@ export const register: Register = on => {
     }
     const openSession = (id: string) => () => update($, view, w => ({ ...w, session: w.session === id ? '' : id }))
     const time = timeFacts(await read($, flow), now)
+    const report = reportPrompts(await read($, typed))
+    const toChatText = (text: string) => async () => {
+      const filled = await $.prompt.fill({ text, mode: 'replace' })
+      if (!filled.isFilled) await $.ui.toast('The chat input cannot take the text now. Close the open dialog, then try again.')
+    }
+    const showOnce = v.once === true
+    const toggleOnce = () => update($, view, w => ({ ...w, once: w.once !== true }))
     const tint = (status: FlowNode['status']) =>
       status === 'running' ? 'suggestion' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'stopped' ? 'warning' : 'inactive'
 
@@ -1729,6 +1804,9 @@ export const register: Register = on => {
           <Button key="tab-sessions" variant={v.tab === 'sessions' ? 'primary' : 'secondary'} onPress={tab('sessions')}>
             Sessions {live > 0 ? `${live} run` : everyone.length > 0 ? everyone.length : ''}
           </Button>
+          <Button key="tab-prompts" variant={v.tab === 'prompts' ? 'primary' : 'secondary'} onPress={tab('prompts')}>
+            My prompts {report.repeated.length > 0 ? `${report.repeated.length} repeat` : report.total > 0 ? report.total : ''}
+          </Button>
           <Button key="demo" plain dimColor onPress={() => toggleDemo($)}>
             {isDemo ? 'Stop demo' : 'Demo'}
           </Button>
@@ -1740,6 +1818,65 @@ export const register: Register = on => {
             <Text>{timeLines(time)[0]}</Text>
             <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
             <Text dimColor>Estimate: each message of yours counts the wait before it, from 30s to 5m.</Text>
+          </Box>
+        )}
+
+        {v.tab === 'prompts' && (
+          <Box flexDirection="column" gap={1}>
+            {report.total === 0 ? (
+              <Text dimColor>No prompts counted yet. Each prompt that you type is counted from now on, and kept on this computer across sessions.</Text>
+            ) : (
+              <Box flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
+                <Text bold>
+                  {report.total} prompts · {report.unique} different · {report.repeated.length} said again
+                </Text>
+                <Text color={report.share >= 30 ? 'warning' : 'success'}>
+                  {report.share}% of your prompts repeat an earlier one{report.since > 0 ? `, since ${new Date(report.since).toISOString().slice(0, 10)}` : ''}.
+                </Text>
+                <Text dimColor>A number, a link, a ticket id or a quoted name does not make a prompt new. Press Make a skill to put the request in the chat input.</Text>
+              </Box>
+            )}
+            {report.repeated.length > 0 && (
+              <Text bold color={HUE.stopped}>
+                ▌ SAID AGAIN · {report.repeated.length}
+              </Text>
+            )}
+            {report.repeated.map(sa => (
+              <Box flexDirection="column" borderStyle="round" borderColor={sa.n >= 3 ? 'warning' : 'subtle'} paddingX={1}>
+                <Text>
+                  <Text bold color={sa.n >= 3 ? HUE.stopped : HUE.running}>
+                    {sa.n}x
+                  </Text>{' '}
+                  {clip(sa.text, 110)}
+                </Text>
+                <Box flexDirection="row" gap={1} flexWrap="wrap">
+                  <Text dimColor>
+                    Last {ago(now - sa.last)}
+                    {sa.n >= 3 ? ' · worth a skill' : ''}
+                  </Text>
+                  <Button key={`auto-${sa.key}`} variant="secondary" onPress={toChatText(automateText(sa))}>
+                    Make a skill
+                  </Button>
+                  <Button key={`again-${sa.key}`} variant="secondary" onPress={toChatText(sa.text)}>
+                    ＋ Again
+                  </Button>
+                </Box>
+              </Box>
+            ))}
+            {report.once.length > 0 && (
+              <Button key="once" plain onPress={toggleOnce}>
+                <Text bold color={DIM}>
+                  {showOnce ? '▾' : '▸'} ▌ SAID ONCE · {report.once.length}
+                </Text>
+                <Text dimColor>{showOnce ? '   press to hide' : '   press to show'}</Text>
+              </Button>
+            )}
+            {showOnce &&
+              report.once.map(sa => (
+                <Text dimColor>
+                  {'  '}1x {clip(sa.text, 110)} · {ago(now - sa.last)}
+                </Text>
+              ))}
           </Box>
         )}
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACTIONS, ago, applyFact, facts, phaseParts, groupTickets, progressParts, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, progressParts, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -359,4 +359,47 @@ test('phaseParts counts blocked and queued tickets as their own parts', () => {
   expect(src).toContain('1 blocked')
   expect(src).toContain('1 queued')
   expect(src).toContain('1 of 3 tickets done')
+})
+
+test('promptKey makes prompts that differ in a number, a link, an id or a quoted name the same', () => {
+  expect(promptKey('Merge PR 12!')).toBe(promptKey('merge pr   13'))
+  expect(promptKey('Verify ticket "#4 Fix the cart" on staging')).toBe(promptKey('verify ticket "#9 Other work" on staging'))
+  expect(promptKey('Look at https://a.test/x and SN-12')).toBe(promptKey('look at https://b.test/y and SN-99'))
+  expect(promptKey('Merge it')).not.toBe(promptKey('Fix it'))
+  expect(promptKey('   ')).toBe('')
+})
+
+test('countPrompt counts a repeat once more, keeps the last text, and skips an empty prompt', () => {
+  let list = countPrompt([], 'Merge PR 12', 100)
+  list = countPrompt(list, 'merge pr 13', 200)
+  list = countPrompt(list, 'Fix the login', 300)
+  expect(list).toHaveLength(2)
+  expect(list[0]).toMatchObject({ n: 2, first: 100, last: 200, text: 'merge pr 13' })
+  expect(countPrompt(list, '  ', 400)).toBe(list)
+})
+
+test('countPrompt drops the oldest single prompt when the list is full', () => {
+  let list = [] as ReturnType<typeof countPrompt>
+  for (let i = 0; i < 400; i++) list = countPrompt(list, `topic ${i.toString(26).replace(/\d/g, d => 'qrstuvwxyz'[Number(d)] ?? 'q')} prompt`, i)
+  list = countPrompt(list, 'merge it', 999)
+  expect(list).toHaveLength(400)
+  expect(list.some(s => s.key === 'merge it')).toBe(true)
+  expect(list.some(s => s.first === 0)).toBe(false)
+})
+
+test('reportPrompts puts the prompts said again first, and gives the share of repeats', () => {
+  const list = [
+    { key: 'a', text: 'a', n: 1, first: 10, last: 10 },
+    { key: 'b', text: 'b', n: 5, first: 5, last: 50 },
+    { key: 'c', text: 'c', n: 2, first: 20, last: 60 },
+  ]
+  const r = reportPrompts(list)
+  expect(r.total).toBe(8)
+  expect(r.unique).toBe(3)
+  expect(r.repeated.map(s => s.key)).toEqual(['b', 'c'])
+  expect(r.once.map(s => s.key)).toEqual(['a'])
+  expect(r.share).toBe(63)
+  expect(r.since).toBe(5)
+  expect(reportPrompts([])).toMatchObject({ total: 0, share: 0, since: 0 })
+  expect(automateText(list[1]!)).toContain('5 times: "b"')
 })

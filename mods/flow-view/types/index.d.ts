@@ -101,6 +101,9 @@ export type Ticket = {
   mineMs?: number
 }
 
+/** A prompt of the person, kept across sessions. Prompts that mean the same count as one. */
+export type Said = { key: string; text: string; n: number; first: number; last: number }
+
 /** A session or an agent that works on the plan. */
 export type Worker = {
   id: string
@@ -125,7 +128,7 @@ export type Board = {
 }
 
 export type View = {
-  tab: 'tickets' | 'sessions'
+  tab: 'tickets' | 'sessions' | 'prompts'
   /** Which tickets the list shows. */
   filter: 'all' | 'running' | 'review' | 'done' | 'needs' | 'queued'
   /** The ticket that is open, or ''. */
@@ -136,12 +139,14 @@ export type View = {
   live?: boolean
   /** The ticket groups that are collapsed. */
   closed?: string[]
+  /** The Prompts tab shows the prompts that were said once. */
+  once?: boolean
   /** Each ticket shows its list of steps. */
   steps?: boolean
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    'flow-view': { flow: Shaped<Flow>; view: Shaped<View>; peers: Shaped<Peer[]>; board: Shaped<Board> }
+    'flow-view': { flow: Shaped<Flow>; view: Shaped<View>; peers: Shaped<Peer[]>; board: Shaped<Board>; typed: Shaped<Said[]> }
   }
 }
