@@ -351,7 +351,7 @@ test('the Prompts tab counts the prompts that the person typed, keeps them, and 
     await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
     await clock.advance(1000)
   }
-  await $.prompt.submit({ text: 'ci: PR 7 is red', wait: false, origin: { kind: 'plugin' } })
+  await $.prompt.submit({ text: 'ci: PR 7 is red', wait: false, origin: { kind: 'plugin', name: 'ci-watch' } })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-prompts' })
