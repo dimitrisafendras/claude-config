@@ -17,8 +17,8 @@ const made = makeColors({
         'surface-2': '#161b45',
         'surface-3': '#1a204e',
         'text-primary': '#eef3ff',
-        'text-secondary': '#c6d1e8',
-        'text-muted': '#9eacc9',
+        'text-secondary': '#d6def0',
+        'text-muted': '#bcc7e0',
       },
     },
   },
@@ -35,12 +35,12 @@ const CARD = { backgroundColor: '#1d2560', radius: 14, padding: 14, shadow: 'non
 
 /**
  * The whole look: the colors, the scene behind the conversation, an indigo frosted glass on the panels of the app
- * (a light blur, so the scene stays in view behind the conversation), and matte indigo cards under the messages and tool rows.
+ * (a light blur, so the shapes of the scene stay in view, and a dark tint, so the rows that a theme cannot give a card stay easy to read: command output, notes of the app, the status line), and matte indigo cards under the messages and tool rows.
  */
 export const LOOK: ThemeSetArgs = {
   colors: made.theme,
   overrideColorScheme: 'dark',
-  backdrop: { scene: SCENE, glass: { blur: 6, tint: '#11153c', opacity: 0.34 } },
+  backdrop: { scene: SCENE, glass: { blur: 6, tint: '#0b0f2e', opacity: 0.66 } },
   style: {
     UserMessage: { ...CARD, backgroundColor: '#2a3478', borderColor: '#e2b44a66', borderWidth: 1 },
     AssistantMessage: CARD,
