@@ -2,13 +2,13 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
 // Nothing sits beneath the plugin: each hook here stands for the engine.
-function engine(on: On, budget: { line: string; exitCode: number }) {
+function engine(on: On, budget: { line: string; exitCode: number }, env: Record<string, string> = { HOME: '/Users/test' }) {
   const runs: string[][] = []
   const notes: string[] = []
   const statuses: (string | undefined)[] = []
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
-  mock.env(on, { HOME: '/Users/test' })
+  mock.env(on, env)
   on('process.run', (_, e) => {
     runs.push([...e.argv])
     const value: ProcessRunResult =
@@ -113,4 +113,11 @@ test('a new reading changes the decision, and /memgov off lets all through', asy
   expect((await $.agent.spawn(SPAWN)).deny).toBeUndefined()
   const status = await $.command.run({ ...CMD, command: 'memgov', args: 'status' })
   expect(status.text).toMatch(/Denies made: 1\./)
+})
+
+test('with no HOME (Windows) the budget script comes from USERPROFILE', async ($, on) => {
+  const { runs, clock } = engine(on, { ...ROOM }, { USERPROFILE: 'C:/Users/me' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(runs[0]).toEqual(['bash', 'C:/Users/me/.claude/mem-budget.sh'])
 })

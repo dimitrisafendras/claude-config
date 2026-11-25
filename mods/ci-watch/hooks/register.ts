@@ -164,10 +164,16 @@ function prInCommand(cmd: string): PrRef | { number: number } | undefined {
 
 // ---------- gh ----------
 
+/** The user's home folder: HOME, else USERPROFILE (Windows apps have no HOME), with `\` as `/`. */
+async function homeDir($: $T): Promise<string | undefined> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+  return home ? home.replace(/\\/g, '/') : undefined
+}
+
 async function expand($: $T, dir: string | undefined): Promise<string | undefined> {
   if (dir === undefined) return undefined
   if (dir === '~' || dir.startsWith('~/')) {
-    const home = await $.env.get('HOME')
+    const home = await homeDir($)
     if (home) return home + dir.slice(1)
   }
   return dir

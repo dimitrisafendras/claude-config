@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
-import { personAsk } from '../hooks/policy.js'
+import { isAbsolutePath, parseMergeCommand, personAsk } from '../hooks/policy.js'
 
 const HOME = '/home/t'
 const RULE_PATH = `${HOME}/.claude/merge-policy.json`
@@ -443,5 +443,25 @@ describe('/merge-policy', () => {
     world(on, { ruleText: '{ repos: ' })
     const out = await run($, 'status')
     expect(out.text).toMatch(/bad rule file \(not valid JSON\)\. Every `gh pr merge` needs a person\./)
+  })
+})
+
+describe('home folders and paths on Windows', () => {
+  test('isAbsolutePath takes /… and C:/… only', () => {
+    expect(isAbsolutePath('/home/t')).toBe(true)
+    expect(isAbsolutePath('C:/Users/me')).toBe(true)
+    expect(isAbsolutePath('relative/dir')).toBe(false)
+    expect(isAbsolutePath('C:relative')).toBe(false)
+    expect(isAbsolutePath('~/x')).toBe(false)
+  })
+
+  test('cd ~/dir expands a USERPROFILE home; a drive path is a cd dir', () => {
+    expect(parseMergeCommand('cd ~/Projects/x && gh pr merge 4 -R acme/web-app --squash', 'C:/Users/me')?.cdDir).toBe('C:/Users/me/Projects/x')
+    expect(parseMergeCommand('cd E:/Projects/x && gh pr merge 4 -R acme/web-app --squash', undefined)?.cdDir).toBe('E:/Projects/x')
+  })
+
+  test('a home or cd dir that is not absolute is still refused', () => {
+    expect(parseMergeCommand('cd ~/x && gh pr merge 4 -R acme/web-app --squash', 'Users/me')).toBeUndefined()
+    expect(parseMergeCommand('cd x && gh pr merge 4 -R acme/web-app --squash', 'C:/Users/me')).toBeUndefined()
   })
 })

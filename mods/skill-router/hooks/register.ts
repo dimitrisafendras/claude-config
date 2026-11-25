@@ -120,7 +120,8 @@ async function scanDir($: $, dir: string): Promise<SkillEntry[]> {
 }
 
 async function refresh($: $): Promise<number> {
-  const home = (await $.env.get('HOME')) ?? ''
+  // Windows apps have no HOME, so USERPROFILE stands in.
+  const home = ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/\\/g, '/')
   const byName = new Map<string, SkillEntry>()
   const user = home === '' ? [] : await scanDir($, `${home}/.claude/skills`)
   const project = mem.cwd === '' ? [] : await scanDir($, `${mem.cwd}/.claude/skills`)

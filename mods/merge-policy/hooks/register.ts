@@ -36,6 +36,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import {
   failedConditions,
   findRule,
+  isAbsolutePath,
   parseMergeCommand,
   parsePrView,
   validateRules,
@@ -77,9 +78,15 @@ type RulesLoad =
 // One toast per distinct problem per load of the module.
 const toasted = new Set<string>()
 
+/** The user's home folder: HOME, else USERPROFILE (Windows apps have no HOME), with `\` as `/`. */
+async function homeDir($: $): Promise<string | undefined> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+  return home ? home.replace(/\\/g, '/') : undefined
+}
+
 async function rulePath($: $): Promise<string | undefined> {
-  const home = await $.env.get('HOME')
-  if (home === undefined || !home.startsWith('/')) return undefined
+  const home = await homeDir($)
+  if (home === undefined || !isAbsolutePath(home)) return undefined
   return `${home.replace(/\/+$/, '')}/${RULE_FILE}`
 }
 
@@ -149,7 +156,7 @@ async function judge(
   if (load.kind === 'missing') return { kind: 'pass', why: 'no rule file' }
   if (load.kind === 'bad') return { kind: 'ask', why: `bad rule file: ${load.error}` }
 
-  const cmd = parseMergeCommand(command, await $.env.get('HOME'))
+  const cmd = parseMergeCommand(command, await homeDir($))
   if (cmd === undefined) return { kind: 'ask', why: 'the command shape is not on the allowed list' }
 
   let repo: string
@@ -236,7 +243,7 @@ async function testText($: $, args: string): Promise<string> {
   if (v.kind === 'pass') return `${head}\nWould pass through to the normal decider: ${v.why}.`
   if (v.kind === 'ask') return `${head}\nWould ask a person (auto mode cannot approve it): ${v.why}.`
   const note =
-    v.kind === 'allow' && parseMergeCommand(command, await $.env.get('HOME'))?.method === undefined
+    v.kind === 'allow' && parseMergeCommand(command, await homeDir($))?.method === undefined
       ? '\nNote: give a method flag allowed by the rule, or the real check denies.'
       : ''
   return `${head}\nWould ${v.kind}: ${v.reason}${note}`

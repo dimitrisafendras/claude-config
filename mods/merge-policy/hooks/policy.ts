@@ -83,6 +83,11 @@ function isBadRepoName(repo: string): boolean {
  * quotes in the gh arguments, flags not on the list, a missing PR number or
  * URL, or a repo that cannot be known without the shell's own cwd.
  */
+/** An absolute path: POSIX (`/…`) or a Windows drive with forward slashes (`C:/…`). Nothing else. */
+export function isAbsolutePath(p: string): boolean {
+  return p.startsWith('/') || /^[A-Za-z]:\//.test(p)
+}
+
 export function parseMergeCommand(
   command: string,
   home: string | undefined,
@@ -98,12 +103,12 @@ export function parseMergeCommand(
     if (quoted !== undefined) cdDir = quoted
     else if (bare !== undefined) {
       if (bare === '~' || bare.startsWith('~/')) {
-        if (home === undefined || !home.startsWith('/')) return undefined
+        if (home === undefined || !isAbsolutePath(home)) return undefined
         cdDir = home.replace(/\/+$/, '') + bare.slice(1)
       } else if (bare.includes('~')) return undefined
       else cdDir = bare
     }
-    if (cdDir === undefined || !cdDir.startsWith('/')) return undefined
+    if (cdDir === undefined || !isAbsolutePath(cdDir)) return undefined
     rest = rest.slice(cd[0].length)
   } else if (/^cd[ \t]/.test(rest)) {
     return undefined

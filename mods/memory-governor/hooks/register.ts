@@ -110,9 +110,10 @@ async function heavyList($: EngineInterface): Promise<string> {
 async function measure($: EngineInterface): Promise<Reading | undefined> {
   try {
     if (scriptPath === undefined) {
-      const home = await $.env.get('HOME')
-      if (!home) throw new Error('HOME is not set')
-      scriptPath = `${home}/.claude/mem-budget.sh`
+      // Windows apps have no HOME, so USERPROFILE stands in.
+      const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+      if (!home) throw new Error('HOME and USERPROFILE are not set')
+      scriptPath = `${home.replace(/\\/g, '/')}/.claude/mem-budget.sh`
     }
     const ran = await $.process.run(['bash', scriptPath], { timeoutMs: 20_000 })
     const r = parseReading(ran.stdout, ran.exitCode, await $.clock.now())
