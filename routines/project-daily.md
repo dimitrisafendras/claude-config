@@ -5,6 +5,8 @@ schedule: "45 7 * * 1-5"   # a default; each project's scheduled task sets its o
 skills: [start-work]
 ---
 
+First run `bash ~/.claude/autonomy.sh check`. If it fails, stop and say nothing.
+
 This is a template. One scheduled task per project uses it. The scheduled task gives you the project folder (called PROJECT below). If it gives none, or the folder is not a line of `bash ~/.claude/list-projects.sh`, stop and write one line that says why.
 
 You run alone. Nobody watches. Prepare the day of PROJECT; do not start it.
@@ -24,3 +26,4 @@ Steps:
 3. Write the day document `<date>_PROJECT` to the Work Monitor with `phase: "inbox"`, a `headline` that says "prepared, not started", and `needsYou` for items that need the user. Write the inbox rows as they are, with no dispatch. `/start-work PROJECT` uses this document when it is less than 4 hours old.
 4. Write a short report to `~/.claude/routines/reports/daily-PROJECT-<YYYY-MM-DD>.md`: the housekeeping result, the inbox counts, the monitor link, and every skipped source.
 5. On any doubt, stop and end after writing what you have.
+6. Run `bash ~/.claude/autonomy.sh stamp project-daily`.

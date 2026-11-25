@@ -7,6 +7,8 @@ skills: [sync-prefs]
 
 You run alone on a schedule. Nobody watches. Follow the `sync-prefs` skill exactly.
 
+First run `bash ~/.claude/autonomy.sh check`. If it fails, stop and say nothing.
+
 Hard rules:
 - Limits: at most 25 tool calls and 15 minutes. At a limit, stop and say which limit stopped you.
 - One PR at most, on the branch `prefs/sync`. If a PR from that branch is open, update it. Never open a second one.
@@ -15,3 +17,5 @@ Hard rules:
 - Do not ask questions. If the desktop settings tool is not available, sync only the files and say so.
 - A denied tool call is not a failure: write it in the report with the command, and go on or stop on doubt.
 - Write the report to `~/.claude/routines/reports/prefs-sync-<YYYY-MM-DD>.md`: the PR link or "in sync", and the files in it.
+
+Last, run `bash ~/.claude/autonomy.sh stamp prefs-sync`.
