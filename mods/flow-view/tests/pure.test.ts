@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, progressParts, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -270,14 +270,6 @@ test('groupTickets puts what needs the person first and what is done last', () =
   const groups = groupTickets([row('a', 'verified'), row('b', 'needs-you'), row('c', 'running'), row('d', 'merged'), row('e', 'blocked')])
   expect(groups.map(g => `${g.label}:${g.rows.map(r => r.id).join('')}`)).toEqual(['NEEDS YOU:be', 'IN PROGRESS:c', 'DONE:ad'])
   expect(groupTickets([])).toEqual([])
-})
-
-test('the bar of the day has one part for each group, in its colour', () => {
-  const row = (id: string, state: string) => ({ id, title: id, state })
-  const parts = progressParts([row('a', 'verified'), row('b', 'merged'), row('c', 'running'), row('d', 'blocked'), row('e', 'queued')], 10)
-  expect(parts.map(p => `${p.key}:${p.text}`)).toEqual(['done:████', 'running:██', 'blocked:██', 'queued:░░'])
-  expect(new Set(parts.map(p => p.hue)).size).toBe(4)
-  expect(progressParts([], 10)).toEqual([])
 })
 
 test('each step of a ticket has its own colour, and a step to do is dim', () => {

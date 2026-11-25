@@ -105,14 +105,15 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'demo' })
   await clock.advance(10000)
-  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/#1 Login fails after a token refresh\s+●●○○○ running 2\/5/)
+  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/#1 Login fails after a token refresh/)
+  expect(await ui.find({ type: 'Text', text: /running 2\/5/ })).toBeDefined()
   const plan = await drawn(ui)
   expect(plan).toContain('START WORK')
   expect(plan).toContain('BREAKDOWN')
   expect(plan).toContain('Fix the refresh call')
 
-  // An open ticket shows its steps and its quick actions with no press. A done ticket does not.
-  expect(await ui.find({ type: 'Text', text: /✓ queued\s+→\s+◉ running/ })).toBeDefined()
+  // An active ticket draws its track and shows its quick actions with no press.
+  expect(await drawn(ui)).toContain('<title>running</title>')
   expect(await ui.find({ key: 'act-status-r05' })).toBeDefined()
   FILLED.length = 0
   await ui.press({ key: 'act-status-r01' })
@@ -171,7 +172,8 @@ test('the plan of /start-work shows as tickets, and a press opens the breakdown'
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await drawn(ui)).toContain('2026-11-22')
   expect(await ui.find({ type: 'Text', text: /Sign in to the board/ })).toBeDefined()
-  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page\s+●●●○○ review 3\/5/)
+  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page/)
+  expect(await ui.find({ type: 'Text', text: /review 3\/5/ })).toBeDefined()
 
   await ui.press({ key: 'ticket-r01' })
   const open = await drawn(ui)
@@ -230,7 +232,8 @@ test('a ticket row shows its PR and the mark of its CI', async ($, on) => {
   await ui.press({ key: 'demo' })
   await clock.advance(46000)
   await ui.press({ key: 'fold-done' })
-  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/PR #101.*✓ CI/)
+  expect(await ui.find({ type: 'Text', text: /PR #101/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ CI/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -267,8 +270,10 @@ test('a merge and a board move in this session update the ticket without a monit
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'fold-done' })
-  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+●●●●○ merged 4\/5/)
-  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+●●○○○ running 2\/5/)
+  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total/)
+  expect(await ui.find({ type: 'Text', text: /merged 4\/5/ })).toBeDefined()
+  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page/)
+  expect(await ui.find({ type: 'Text', text: /running 2\/5/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -296,7 +301,6 @@ test('the Time section counts the messages of the person, not the turns that a n
   expect(status).toMatch(/You: 2 messages · about 2m 30s of your time \(13%\) · the work waited 2m 00s for you/)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /Time of this session/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /You: 2 messages/ })).toBeDefined()
   await ui.unmount()
 })
@@ -326,21 +330,21 @@ test('a group folds, and a ticket shows its steps, its time and the part of the 
   await clock.advance(3000)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /1 of 2 done/ })).toBeDefined()
+  expect((await ui.find({ key: 'filter-done' }))?.text).toMatch(/1\s+Done/)
   // The done group starts folded. A press opens it, and a second press folds it again.
-  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▸ ▌ DONE · 1 {3}press to show/)
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▸ ✓ DONE\s+1/)
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   await ui.press({ key: 'fold-done' })
-  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▾ ▌ DONE · 1 {3}press to hide/)
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▾ ✓ DONE\s+1/)
   expect(await ui.find({ key: 'ticket-r01' })).toBeDefined()
   await ui.press({ key: 'fold-done' })
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   expect(await ui.find({ key: 'ticket-r02' })).toBeDefined()
-  await ui.press({ key: 'fold-all' })
-  await ui.press({ key: 'steps' })
-  expect(await ui.find({ type: 'Text', text: /✓ queued {2}→ {2}✓ running {2}→ {2}✓ review {2}→ {2}◉ merged {2}→ {2}○ verified/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Time: 20m 00s · you about 2m 00s \(10%\)/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Time: not measured/ })).toBeDefined()
+  await ui.press({ key: 'fold-done' })
+  await ui.press({ key: 'ticket-r01' })
+  expect(await ui.find({ type: 'Text', text: /⏱ 20m 00s · you about 2m 00s \(10%\)/ })).toBeDefined()
+  await ui.press({ key: 'ticket-r02' })
+  expect(await ui.find({ type: 'Text', text: /⏱ not measured/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -355,14 +359,14 @@ test('the Prompts tab counts the prompts that the person typed, keeps them, and 
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-prompts' })
-  expect(await ui.find({ type: 'Text', text: /3 prompts · 2 different · 1 said again/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /33% of your prompts repeat/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^33%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /2x/ })).toBeDefined()
   FILLED.length = 0
   const make = (await ui.findAll({ type: 'Button' })).find(b => String(b.props.key).startsWith('auto-'))
   await ui.press({ key: String(make?.props.key) })
   expect(FILLED[0]).toMatch(/^replace:I said this 2 times: "merge pr 13"/)
   await ui.press({ key: 'once' })
-  expect(await ui.find({ type: 'Text', text: /1x Fix the login/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /○ Fix the login/ })).toBeDefined()
   await ui.unmount()
 })
 

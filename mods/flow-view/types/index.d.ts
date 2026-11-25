@@ -141,8 +141,6 @@ export type View = {
   closed?: string[]
   /** The Prompts tab shows the prompts that were said once. */
   once?: boolean
-  /** Each ticket shows its list of steps. */
-  steps?: boolean
 }
 
 declare module 'claude-code' {
