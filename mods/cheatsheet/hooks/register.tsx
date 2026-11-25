@@ -6,9 +6,15 @@ import type { CheatButton } from '../types'
 // The link of your skills cheat sheet page is one line in ~/.claude/cheat-sheet-url. No file: no link is shown.
 const SHEET_FILE = '.claude/cheat-sheet-url'
 
+/** The user's home folder. Windows apps have no HOME, so USERPROFILE stands in. Empty when neither is set. */
+async function homeDir($: EngineInterface): Promise<string> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
+  return home.replace(/\\/g, '/')
+}
+
 async function sheetUrl($: EngineInterface): Promise<string> {
   try {
-    const home = (await $.env.get('HOME')) ?? ''
+    const home = await homeDir($)
     return String(await $.fs.read(`${home}/${SHEET_FILE}`)).trim()
   } catch {
     return ''
@@ -52,7 +58,7 @@ export function parseButtons(text: string): CheatButton[] | undefined {
 
 async function loadButtons($: $): Promise<CheatButton[]> {
   try {
-    const home = (await $.env.get('HOME')) ?? ''
+    const home = await homeDir($)
     if (home === '') return DEFAULT_BUTTONS
     const t = await $.fs.read(`${home}/.claude/cheat-buttons.json`)
     return typeof t === 'string' ? (parseButtons(t) ?? DEFAULT_BUTTONS) : DEFAULT_BUTTONS
@@ -99,7 +105,7 @@ export function entryOf(dirName: string, text: string): Entry | undefined {
 }
 
 async function load($: $): Promise<Entry[]> {
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = await homeDir($)
   if (home === '') return []
   const dir = `${home}/.claude/skills`
   let list
