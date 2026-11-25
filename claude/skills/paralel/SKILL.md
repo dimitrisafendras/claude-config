@@ -55,7 +55,7 @@ Each lane has done criteria and a check that it must pass (`keep-it-running.md`,
 
 ## Lane loop
 
-Each lane is a loop with no person in it: work → PR → reviewer → fix red CI and conflicts (at most 3 automatic tries for each PR) → merge on green under `merge-policy` → deploy check → verify on staging → close the ticket → `cleanup`. `ci-watch` wakes the lane at each CI event. Each lane writes the `next` field of its ticket row (up to 90 characters: what happens next and when). Each lane ends `done` or `needs-you`. Check the kill switch first (`bash ~/.claude/scripts/autonomy.sh check`). Stages and limits: `references/lane-loop.md`. A person is still needed for: a production release (a release tag), any message to other people, money, secrets, sign-ins and destructive data actions. These only become decision records. `/autonomy run lane <ticket>` runs one lane loop now.
+Each lane is a loop with no person in it: work → PR → reviewer → fix red CI and conflicts (at most 3 automatic tries for each PR) → merge on green under `merge-policy` → deploy check → verify on staging → close the ticket → `cleanup`. `ci-watch` wakes the lane at each CI event. Each lane writes the `next` field of its ticket row (up to 90 characters: what happens next and when). Each lane ends `done` or `needs-you`. Check the kill switch first (`bash ~/.claude/autonomy.sh check`). Stages and limits: `references/lane-loop.md`. A person is still needed for: a production release (a release tag), any message to other people, money, secrets, sign-ins and destructive data actions. These only become decision records. `/autonomy run lane <ticket>` runs one lane loop now.
 
 ## Decisions
 

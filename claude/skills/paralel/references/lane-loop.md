@@ -1,6 +1,6 @@
 # Lane loop: one ticket, no person in it
 
-Read this when a lane starts, when `ci-watch` wakes a lane, and when `/autonomy run lane <ticket>` runs. Each stage ends in the next stage or in `needs-you`. The kill switch (`~/.claude/autonomy.off`) is checked first: `bash ~/.claude/scripts/autonomy.sh check` (exit non-zero = stop).
+Read this when a lane starts, when `ci-watch` wakes a lane, and when `/autonomy run lane <ticket>` runs. Each stage ends in the next stage or in `needs-you`. The kill switch (`~/.claude/autonomy.off`) is checked first: `bash ~/.claude/autonomy.sh check` (exit non-zero = stop).
 
 ## The stages
 

@@ -12,7 +12,7 @@ Remove dead worktrees and archive finished sessions. Never lose work, and say wh
 ## When it runs
 
 - **Right after a merge, for that lane:** `paralel` runs it as the last stage of the lane loop, for the lane's worktree and branch only. Pass the lane's worktree path (`--keep` for all the others). The rules below still apply.
-- **Nightly, for all:** the `nightly-cleanup` routine. Both skip when the kill switch is on (`bash ~/.claude/scripts/autonomy.sh check`).
+- **Nightly, for all:** the `nightly-cleanup` routine. Both skip when the kill switch is on (`bash ~/.claude/autonomy.sh check`).
 
 ## Rules
 

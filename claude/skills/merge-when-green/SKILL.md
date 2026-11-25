@@ -12,7 +12,7 @@ Merge one pull request, and only when it is ready. Read the state once. Never po
 
 ## In a loop
 
-The lane loop runs this skill at its merge stage, with no person. Check `bash ~/.claude/scripts/autonomy.sh check` first. In a company repo, merging on green under `merge-policy` needs no approval. Anything that stops the merge (red CI, a conflict, a refused rule) goes back to the lane: fix it within the limit of 3 automatic tries for each PR, then `needs-you` with a decision record. Never retry a refused merge.
+The lane loop runs this skill at its merge stage, with no person. Check `bash ~/.claude/autonomy.sh check` first. In a company repo, merging on green under `merge-policy` needs no approval. Anything that stops the merge (red CI, a conflict, a refused rule) goes back to the lane: fix it within the limit of 3 automatic tries for each PR, then `needs-you` with a decision record. Never retry a refused merge.
 
 ## Steps
 

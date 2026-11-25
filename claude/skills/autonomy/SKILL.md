@@ -8,13 +8,13 @@ effort: low
 
 # Autonomy
 
-The loops run flows with no person in them. This skill shows them, stops them and runs one by hand. The script `~/.claude/scripts/autonomy.sh` holds the state. Never write the state files yourself.
+The loops run flows with no person in them. This skill shows them, stops them and runs one by hand. The script `~/.claude/autonomy.sh` holds the state. Never write the state files yourself.
 
 ## Commands
 
-- **`/autonomy status`**: run `bash ~/.claude/scripts/autonomy.sh status`. Show each loop with its last run and next run, and the kill switch. Add one line: what needs the person (open decision records).
-- **`/autonomy off [reason]`**: run `bash ~/.claude/scripts/autonomy.sh off "<reason>"`. This creates `~/.claude/autonomy.off`. Every loop stops at its next check. Say so in one line.
-- **`/autonomy on`**: run `bash ~/.claude/scripts/autonomy.sh on`. This removes the file. Then run `status`.
+- **`/autonomy status`**: run `bash ~/.claude/autonomy.sh status`. Show each loop with its last run and next run, and the kill switch. Add one line: what needs the person (open decision records).
+- **`/autonomy off [reason]`**: run `bash ~/.claude/autonomy.sh off "<reason>"`. This creates `~/.claude/autonomy.off`. Every loop stops at its next check. Say so in one line.
+- **`/autonomy on`**: run `bash ~/.claude/autonomy.sh on`. This removes the file. Then run `status`.
 - **`/autonomy run <loop>`**: the manual trigger. See below.
 - **`/autonomy run lane <ticket>`**: run the lane loop for one ticket now (see below).
 
@@ -22,7 +22,7 @@ The loops run flows with no person in them. This skill shows them, stops them an
 
 Loops: `morning-prep`, `project-daily`, `daily-digest`, `sweep`, `config-loop`, `weekly-setup-audit`, `weekly-claude-releases`, `nightly-cleanup`, `prefs-sync`.
 
-1. Run `bash ~/.claude/scripts/autonomy.sh run <loop>`. The script checks the kill switch, writes the stamp and prints the prompt of the loop.
+1. Run `bash ~/.claude/autonomy.sh run <loop>`. The script checks the kill switch, writes the stamp and prints the prompt of the loop.
 2. If the script refuses (kill switch on, unknown loop), say why and stop. Do not work around it.
 3. Else do what the printed prompt says, once, in this session. Use the same rules as the scheduled run. Do not schedule anything.
 4. Report in two lines: what the loop did, and what it left for the person.
@@ -33,7 +33,7 @@ A manual run ignores the schedule, not the kill switch and not the limits.
 
 `/autonomy run lane <ticket>` (for example `SN-123`):
 
-1. Run `bash ~/.claude/scripts/autonomy.sh run lane <ticket>`. Stop if it refuses.
+1. Run `bash ~/.claude/autonomy.sh run lane <ticket>`. Stop if it refuses.
 2. Read the ticket. A ticket that is blocked or `needs-you` does not start: say why.
 3. Run the `paralel` lane loop for this one ticket (see "Lane loop" in the `paralel` skill): work, PR, reviewer, CI fixes, merge on green, deploy check, staging verify, close, cleanup.
 4. End with `done` or `needs-you` and the decision record.

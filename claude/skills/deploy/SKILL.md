@@ -13,7 +13,7 @@ Follow a change after the merge: deploy, verify, release.
 ## Rules
 
 - **Staging only.** Production only when the user names it in this turn. A release tag is never a loop step: it is a decision record.
-- **Can start by itself.** `ci-watch` starts this skill after a merge in a lane loop. It then needs no approval for the staging wait and the staging verify. Check `bash ~/.claude/scripts/autonomy.sh check` first.
+- **Can start by itself.** `ci-watch` starts this skill after a merge in a lane loop. It then needs no approval for the staging wait and the staging verify. Check `bash ~/.claude/autonomy.sh check` first.
 - **Never bypass CI or a failed deploy.** A failed deploy run stops the skill: report the run and the failing job. Do not re-run. Do not verify against the old build.
 - **Read-only in the app.** No data changes, unless a test-plan item needs test data. Then use marked test data and say what was created.
 - **Sign-in is the user's job.** At a login page stop and ask. Never enter passwords or codes. In a loop run, end `needs-you` with a decision record instead of a question.

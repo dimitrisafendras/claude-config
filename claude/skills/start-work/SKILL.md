@@ -61,7 +61,7 @@ Order:
 
 Print the plan as one table (`#`, item link, repo, surface, severity, size · model, why, due). Then write the plan rows to the monitor (`phase: "plan"`) and give the user the monitor link in one line.
 
-**What starts without a question (the day loop):** severity 4 rows, PR fixes (groups 1 and 2) and tasks (group 3) that are not `blocked` and not `needs-you`. Check `bash ~/.claude/scripts/autonomy.sh check` first: with the kill switch on, print the plan and start nothing. A `blocked` or `needs-you` row starts nothing; an open choice becomes a decision record (`paralel`, "Decisions"). Where a person is still needed: a production release, a message to other people, money, secrets, sign-ins, destructive data actions.
+**What starts without a question (the day loop):** severity 4 rows, PR fixes (groups 1 and 2) and tasks (group 3) that are not `blocked` and not `needs-you`. Check `bash ~/.claude/autonomy.sh check` first: with the kill switch on, print the plan and start nothing. A `blocked` or `needs-you` row starts nothing; an open choice becomes a decision record (`paralel`, "Decisions"). Where a person is still needed: a production release, a message to other people, money, secrets, sign-ins, destructive data actions.
 
 **Today's cut.** The inbox can hold 50 or more items. Put at most 12 dispatchable rows in the plan (the top of the order), plus the not-dispatched groups. Name the others in the day document's `headline` ("and 30 more for later"). When a row finishes, take the next item.
 
