@@ -2053,7 +2053,7 @@ export const register: Register = on => {
     const TILES: [View['filter'], string, string][] = [
       ['all', 'All', INK],
       ['running', 'Running', HUE.running],
-      ['review', 'In review', '#c084fc'],
+      ['review', 'In review', REVIEW_HUE],
       ['done', 'Done', HUE.completed],
       ['needs', 'Needs you', HUE.stopped],
       ['queued', 'Queued', DIM],
@@ -2272,9 +2272,16 @@ export const register: Register = on => {
                 // One real button for each tile: no box around a button, so the hover ring is not a second border.
                 return (
                   <Button key={`filter-${group}`} variant={isOn ? 'primary' : 'secondary'} onPress={only(group)}>
-                    <Text bold color={count(group) > 0 && !dim ? hue : 'inactive'}>
-                      {count(group)}
-                    </Text>{' '}
+                    {group !== 'all' && count(group) > 0 && !dim ? (
+                      // The count sits on the colour that its arc has in the ring of the day.
+                      <Text bold color={CARD} backgroundColor={hue}>
+                        {` ${count(group)} `}
+                      </Text>
+                    ) : (
+                      <Text bold color={count(group) > 0 && !dim ? hue : 'inactive'}>
+                        {count(group)}
+                      </Text>
+                    )}{' '}
                     {label}
                   </Button>
                 )
