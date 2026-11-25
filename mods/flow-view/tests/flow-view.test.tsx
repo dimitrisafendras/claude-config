@@ -27,6 +27,8 @@ function world(on: On) {
   on('session.id', () => ({ value: 'session-1' }))
   on('session.cwd', () => ({ value: '/work/web-app' }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_, e) => ({ text: e.text, context: e.context }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
   on('tool.call', () => ({ result: {} }))
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
 
@@ -252,5 +254,34 @@ test('a merge and a board move in this session update the ticket without a monit
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+merged/)
   expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+running/)
+  await ui.unmount()
+})
+
+
+test('the Time section counts the messages of the person, not the turns that a notice starts', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.prompt.submit({ text: 'Fix the login bug', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'Fix the login bug', turnId: 't1' })
+  await clock.advance(600_000)
+  await $.turn.complete({ turnId: 't1', reason: 'done', answer: 'Done.' } as never)
+  await clock.advance(120_000)
+  await $.prompt.submit({ text: 'Now add a test', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'Now add a test', turnId: 't2' })
+  await clock.advance(300_000)
+  await $.turn.complete({ turnId: 't2', reason: 'done', answer: 'Done.' } as never)
+  await clock.advance(60_000)
+  await $.prompt.submit({ text: 'ci: PR 7 is green', wait: false, origin: { kind: 'plugin' } } as never)
+  await $.turn.start({ text: 'ci: PR 7 is green', turnId: 't3' })
+  await clock.advance(120_000)
+  await $.turn.complete({ turnId: 't3', reason: 'done', answer: 'Done.' } as never)
+
+  const status = (await $.command.run({ command: 'flow', args: 'status', ...RUN })).text
+  expect(status).toMatch(/Total 20m 00s · Claude worked 17m 00s · 1 turn started with no message of yours/)
+  expect(status).toMatch(/You: 2 messages · about 2m 30s of your time \(13%\) · the work waited 2m 00s for you/)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Time of this session/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /You: 2 messages/ })).toBeDefined()
   await ui.unmount()
 })
