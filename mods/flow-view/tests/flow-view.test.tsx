@@ -141,7 +141,15 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
 
   // A count tile is a button: a press shows only its tickets.
   expect((await ui.find({ key: 'filter-needs' }))?.text).toMatch(/2\s+Needs you/)
+  // On the desktop each tile has a frame in the colour of its arc, with the corner radius of the button (`single`).
+  expect((await ui.find({ key: 'tile-needs' }))?.props).toMatchObject({ padding: 0, borderStyle: 'single', borderColor: '#fbbf24', backgroundColor: '#fbbf2459' })
+  expect((await ui.find({ key: 'tile-running' }))?.props).toMatchObject({ borderStyle: 'single', borderColor: '#22d3ee' })
+  // The tile of all tickets has the same frame with no colour, so each button has the same size.
+  expect((await ui.find({ key: 'tile-all' }))?.props).toMatchObject({ padding: 0, borderStyle: 'single', borderColor: '#00000000' })
   await ui.press({ key: 'filter-needs' })
+  // With a filter on, only its tile keeps the colour.
+  expect((await ui.find({ key: 'tile-needs' }))?.props).toMatchObject({ borderColor: '#fbbf24' })
+  expect((await ui.find({ key: 'tile-running' }))?.props).toMatchObject({ borderColor: '#00000000' })
   expect(await ui.find({ key: 'ticket-r05' })).toBeDefined()
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   await ui.press({ key: 'filter-needs' })
