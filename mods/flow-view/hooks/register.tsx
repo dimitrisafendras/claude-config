@@ -1477,6 +1477,30 @@ export function drawPhases(b: Board): Drawing {
 }
 
 /** One ticket, opened: its session, its agents and its PR. */
+/** The day as a ring: each group is an arc in its colour, and the centre gives the share that is done. */
+export function drawOverview(rows: Ticket[]): Drawing {
+  const total = rows.length
+  const done = rows.filter(t => bucket(t.state) === 'done').length
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+  const R = 62
+  const C = 2 * Math.PI * R
+  let offset = 0
+  let arcs = `<circle cx="90" cy="80" r="${R}" fill="none" stroke="${EDGE}" stroke-width="14"/>`
+  for (const p of phaseParts(rows)) {
+    if (p.n === 0) continue
+    const len = (p.n / total) * C
+    arcs +=
+      `<circle cx="90" cy="80" r="${R}" fill="none" stroke="${p.hue}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 90 80)"` +
+      `${p.key === 'done' ? ' filter="url(#glow)"' : ''}><title>${esc(p.label)}: ${p.n}</title></circle>`
+    offset += len
+  }
+  const centre =
+    `<text x="90" y="86" text-anchor="middle" class="b" style="font-size:24px">${pct}%</text>` +
+    `<text x="90" y="104" text-anchor="middle" class="s">${done} of ${total} done</text>`
+
+  return frame(arcs + centre, 170, 180)
+}
+
 export function drawTicket(t: Ticket, workers: Worker[]): Drawing {
   const g = drawGraph(ticketNodes(t, workers), '', 0, 'BREAKDOWN')
 
@@ -1764,6 +1788,7 @@ export const register: Register = on => {
     // The day in four numbers. Each is a button: a press shows only its
     // tickets, and a second press shows all tickets again.
     const TILES: [View['filter'], string, string][] = [
+      ['all', 'All', INK],
       ['running', 'Running', HUE.running],
       ['review', 'In review', '#c084fc'],
       ['done', 'Done', HUE.completed],
@@ -1818,13 +1843,18 @@ export const register: Register = on => {
           </Button>
         </Box>
 
-        {time !== undefined && (
-          <Box key="time" flexDirection="row" gap={2} flexWrap="wrap" borderStyle="round" borderColor="subtle" paddingX={1}>
-            <Text bold>⏱</Text>
-            <Text>{timeLines(time)[0]}</Text>
-            <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
-          </Box>
-        )}
+        <Box key="overview" flexDirection="row" gap={2} flexWrap="wrap">
+          {'Svg' in t && sorted.length > 0 && (
+            <t.Svg source={drawOverview(sorted).source} width={180} alt={`${count('done')} of ${sorted.length} tickets done.`} />
+          )}
+          {time !== undefined && (
+            <Box flexDirection="column" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
+              <Text bold>⏱ Time of this session</Text>
+              <Text>{timeLines(time)[0]}</Text>
+              <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
+            </Box>
+          )}
+        </Box>
 
         {v.tab === 'prompts' && (
           <Box flexDirection="column" gap={1}>
@@ -1911,11 +1941,6 @@ export const register: Register = on => {
                 </Box>
               ))}
             </Box>
-            {v.filter !== 'all' && (
-              <Button key="filter-all" plain dimColor onPress={only('all')}>
-                Showing {matching.length} of {count('all')}. Show all tickets
-              </Button>
-            )}
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column">

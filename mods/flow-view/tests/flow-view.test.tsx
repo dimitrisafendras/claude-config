@@ -390,3 +390,17 @@ test('an active ticket with a link has a link that the browser opens, and a tick
   expect(links.map(l => l.props.href)).toEqual(['https://app.example.com/t/abc'])
   await ui.unmount()
 })
+
+test('the All tile is first, counts every ticket, and shows them all again', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'demo' })
+  await clock.advance(10000)
+  expect((await ui.find({ key: 'filter-all' }))?.text).toMatch(/6\s+All/)
+  await ui.press({ key: 'filter-running' })
+  expect(await ui.find({ key: 'ticket-r05' })).toBeUndefined()
+  await ui.press({ key: 'filter-all' })
+  expect(await ui.find({ key: 'ticket-r05' })).toBeDefined()
+  await ui.unmount()
+})
