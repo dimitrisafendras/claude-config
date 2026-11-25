@@ -1684,7 +1684,7 @@ export const register: Register = on => {
     const width = Math.min(Math.round(W * SCALE), Math.max(280, (e.props.bodyColumns ?? 80) * 9))
     const sorted = sortTickets(day.rows)
     const matching = sorted.filter(r => v.filter === 'all' || bucket(r.state) === v.filter)
-    const rows = matching.slice(0, MAX_LIST)
+    const rows = matching
     const count = (group: View['filter']) => sorted.filter(r => group === 'all' || bucket(r.state) === group).length
     const only = (group: View['filter']) => () =>
       update($, view, w => ({ ...w, filter: w.filter === group ? 'all' : group, ticket: '' }))
@@ -1791,7 +1791,6 @@ export const register: Register = on => {
             {rows.length > 0 && (
               <Text dimColor>▸ opens and ▾ closes: press a group name or a ticket. The buttons of a ticket put a text in the chat input and do not send it.</Text>
             )}
-            {matching.length > rows.length && <Text dimColor>+{matching.length - rows.length} more tickets, below the first {rows.length}.</Text>}
             {v.filter === 'all' && sorted.length > 0 && (
               <Text key="progress" bold>
                 {progressParts(sorted).map(p => (
