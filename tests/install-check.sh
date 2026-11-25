@@ -137,6 +137,15 @@ if [ -n "$LINKS" ]; then
   out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --profile "$P10" 2>&1); rc=$?
   [ "$rc" = 0 ] || { echo "FAIL: install of a profile without a policy gave exit $rc"; echo "$out" | tail -5; fail=1; }
   [ ! -e "$H/.claude/merge-policy.json" ] || { echo "FAIL: merge-policy.json made from a profile that has none"; fail=1; }
+  # (d) a dangling link at the target is left alone: nothing is copied through it.
+  H="$T/home10c"; mkdir -p "$H/.claude"; mkdir -p "$T/nowhere10"; printf '{"repos":{},"requireGreen":true,"allowAdmin":false}
+' > "$P10/merge-policy.json"
+  ln -s "$T/nowhere10/policy-target" "$H/.claude/merge-policy.json"
+  out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --profile "$P10" 2>&1); rc=$?
+  [ "$rc" = 0 ] || { echo "FAIL: install over a dangling link gave exit $rc"; echo "$out" | tail -5; fail=1; }
+  if echo "$out" | grep -q "copied merge-policy.json"; then echo "FAIL: install copied merge-policy.json over a dangling link"; fail=1; fi
+  [ ! -e "$T/nowhere10/policy-target" ] || { echo "FAIL: install wrote through a dangling link"; fail=1; }
+  [ -L "$H/.claude/merge-policy.json" ] || { echo "FAIL: the dangling link is gone"; fail=1; }
 fi
 
 [ "$fail" = 0 ] && echo "install-check: all tests passed"
