@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, phaseParts, groupTickets, progress, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -253,4 +253,92 @@ test('timeFacts gives the total, the work time and the share of the person', () 
   if (facts === undefined) return
   expect(timeLines(facts)[0]).toBe('Total 1h 00m · Claude worked 40m 00s · 3 turns started with no message of yours')
   expect(timeLines(facts)[1]).toBe('You: 2 messages · about 6m 00s of your time (10%) · the work waited 15m 00s for you')
+})
+
+test('stepOf shows how far a ticket is, and no step for a ticket that waits for the person', () => {
+  expect(stepOf('queued').text).toBe('●○○○○ queued 1/5')
+  expect(stepOf('review').text).toBe('●●●○○ review 3/5')
+  expect(stepOf('draft').at).toBe(3)
+  expect(stepOf('verified').text).toBe('●●●●● verified 5/5')
+  expect(stepOf('closed').at).toBe(5)
+  expect(stepOf('needs-you')).toEqual({ total: 5, text: 'needs-you' })
+  expect(stepOf('blocked').at).toBeUndefined()
+})
+
+test('groupTickets puts what needs the person first and what is done last', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const groups = groupTickets([row('a', 'verified'), row('b', 'needs-you'), row('c', 'running'), row('d', 'merged'), row('e', 'blocked')])
+  expect(groups.map(g => `${g.label}:${g.rows.map(r => r.id).join('')}`)).toEqual(['NEEDS YOU:be', 'IN PROGRESS:c', 'DONE:ad'])
+  expect(groupTickets([])).toEqual([])
+})
+
+test('progress draws a bar with the count and the percent', () => {
+  expect(progress(5, 10, 10)).toBe('█████░░░░░ 5 of 10 done (50%)')
+  expect(progress(0, 4, 4)).toBe('░░░░ 0 of 4 done (0%)')
+  expect(progress(3, 3, 6)).toBe('██████ 3 of 3 done (100%)')
+  expect(progress(0, 0)).toBe('')
+})
+
+test('stepList names each step and marks the current one', () => {
+  expect(stepList('review')).toBe('✓ queued  →  ✓ running  →  ◉ review  →  ○ merged  →  ○ verified')
+  expect(stepList('verified')).toBe('✓ queued  →  ✓ running  →  ✓ review  →  ✓ merged  →  ✓ verified')
+  expect(stepList('needs-you')).toBe('! Waits for you')
+  expect(stepList('blocked')).toBe('✗ Blocked')
+})
+
+test('timed starts the time when work starts and ends it when the ticket is done', () => {
+  const queued = timed(undefined, { id: 'r1', title: 'One', state: 'queued' }, 10)
+  expect(queued.startedAt).toBeUndefined()
+  const running = timed(queued, { ...queued, state: 'running' }, 20)
+  expect(running.startedAt).toBe(20)
+  expect(running.endedAt).toBeUndefined()
+  const merged = timed({ ...running, mine: 2, mineMs: 90 }, { id: 'r1', title: 'One', state: 'merged' }, 50)
+  expect(merged).toEqual({ id: 'r1', title: 'One', state: 'merged', startedAt: 20, endedAt: 50, mine: 2, mineMs: 90 })
+  expect(timed(merged, { ...merged, state: 'verified' }, 80).endedAt).toBe(50)
+  expect(timed(merged, { ...merged, state: 'running' }, 90).endedAt).toBeUndefined()
+})
+
+test('shareTime gives the time of the person to the open tickets in equal parts', () => {
+  const day = { id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [
+    { id: 'r1', title: 'One', state: 'running', startedAt: 5 },
+    { id: 'r2', title: 'Two', state: 'review', startedAt: 6, mine: 1, mineMs: 10_000 },
+    { id: 'r3', title: 'Three', state: 'merged', startedAt: 1, endedAt: 4 },
+    { id: 'r4', title: 'Four', state: 'queued' },
+  ] }
+  const next = shareTime(day, 60_000, 9)
+  expect(next.rows.map(r => r.mineMs)).toEqual([30_000, 40_000, undefined, undefined])
+  expect(next.rows.map(r => r.mine)).toEqual([1, 2, undefined, undefined])
+  expect(shareTime({ ...day, rows: [day.rows[2]!, day.rows[3]!] }, 60_000, 9).rows[0]?.mineMs).toBeUndefined()
+  expect(shareTime(day, 0, 9)).toBe(day)
+})
+
+test('ticketTime gives the time of the ticket and the part of the person', () => {
+  expect(ticketTime({ id: 'r', title: 'T', state: 'queued' }, 100)).toBe('')
+  expect(ticketTime({ id: 'r', title: 'T', state: 'merged', startedAt: 0, endedAt: 3_600_000, mineMs: 360_000 }, 9_999_999)).toBe('1h 00m · you about 6m 00s (10%)')
+  expect(ticketTime({ id: 'r', title: 'T', state: 'running', startedAt: 0 }, 600_000)).toBe('10m 00s so far · you about 0ms (0%)')
+})
+
+test('a closed day with open tickets does not show a green done step', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const day = { id: 'd', phase: 'done', needsYou: [], updatedAt: 1, workers: [], rows: [row('a', 'verified'), row('b', 'needs-you'), row('c', 'review')] }
+  const open = drawPhases(day).source
+  expect(open).toContain('closed, 2 open')
+  expect(open).toContain('1 of 3 tickets done · 2 not done')
+  expect(open).toContain('1 need you')
+  expect(open).toContain('0 blocked')
+  expect(open).toContain('0 queued')
+  const all = drawPhases({ ...day, rows: [row('a', 'verified'), row('d', 'merged')] }).source
+  expect(all).not.toContain('closed,')
+  expect(all).toContain('>done</text>')
+  expect(all).toContain('2 of 2 tickets done</text>')
+})
+
+test('phaseParts counts blocked and queued tickets as their own parts', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const parts = phaseParts([row('a', 'verified'), row('b', 'needs-you'), row('c', 'blocked'), row('d', 'failed'), row('e', 'queued'), row('f', 'running'), row('g', 'draft')])
+  expect(parts.map(p => `${p.key}:${p.n}`)).toEqual(['done:1', 'running:1', 'review:1', 'needs:1', 'blocked:2', 'queued:1'])
+  const src = drawPhases({ id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')] }).source
+  expect(src).toContain('1 blocked')
+  expect(src).toContain('1 queued')
+  expect(src).toContain('1 of 3 tickets done')
 })
