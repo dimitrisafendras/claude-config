@@ -55,7 +55,7 @@ Check the lanes when a report arrives and when you are about to start something 
 
 A merged PR is not the end for work that users see.
 
-- **Lane with `env`** (web or mobile UI): after its PR merges, run the `deploy` skill for that PR: wait for the staging deploy, test the PR's test plan in the app, and say how far it got. The ledger state goes `merged` to `verified`. The ticket moves to done only after `verified` (`keep-the-board-current.md`).
+- **Lane with `env`** (web or mobile UI): after its PR merges (`ci-watch` starts this by itself), run the `deploy` skill for that PR, with the evidence attached to the ticket: wait for the staging deploy, test the PR's test plan in the app, and say how far it got. The ledger state goes `merged` to `verified`. The ticket moves to done only after `verified` (`keep-the-board-current.md`).
 - **Lane with no `env`** (backend, infra): run `deploy status` for the PR. A failed deploy puts the lane back to `blocked` with the reason. It does not need a browser check unless the ticket asks for one.
 - **Docs, review and ticket-only lanes:** no deploy step. `merged` goes to `done`.
 - The coordinator runs this step, or gives it to the lane before the lane is archived. It needs one heavy slot only when it opens the app.
@@ -100,8 +100,8 @@ Each lane ends with a green PR, not with "pushed". The steps, in order:
    - An infrastructure failure (a rate-limited download, a runner outage): re-run once with `gh run rerun <run> --failed`. If it fails again, report it with the log and stop.
    - "draft: CI not run", or a run that was cancelled and replaced by a newer run on the same commit: not a failure. Do nothing.
    - A conflict or a branch behind `main`: merge `origin/main` in (a merge commit), then run the check again.
-4. **Limit the tries.** At most 3 fix rounds for the same failing check, and 6 for the whole PR. After that the lane stops, sets `blocked`, and sends the coordinator the check name, the log tail and what it tried. Never apply `ci-break-glass`, never post `/ci-bypass`, never weaken a check or a test to get green.
+4. **Limit the tries.** At most 3 automatic fix tries for each PR, over all checks. After that the lane stops, ends `needs-you` with a decision record, and sends the coordinator the check name, the log tail and what it tried. Never apply `ci-break-glass`, never post `/ci-bypass`, never weaken a check or a test to get green.
 5. **Green means every required check passed on the head commit.** Check it with one call (`gh pr view <n> --json statusCheckRollup,mergeable,headRefOid`), not from memory. Then the ledger state goes `ready` and the lane reports the PR link and the head commit.
-6. **The merge is a different step.** The lane never merges. The coordinator merges only as `finishing-ci-and-merge.md` and the user's standing rules say; for a repo of the organization, that means the user says yes.
+6. **The merge is a different step.** In a loop run, the lane merges on green under `merge-policy` (the `merge-when-green` rules), with no approval, in a company repo. Where there is no such policy, the coordinator merges only as `finishing-ci-and-merge.md` and the user's standing rules say. A refusal of the policy is final: `needs-you`.
 
 The ledger shows the PR line as "CI running", "red: <check>, fixing (round 2 of 3)", "green, waits for <who>", or "blocked: <check>".

@@ -18,6 +18,23 @@ A Claude Code setup in two layers, two repos:
 - A profile with a `sync.sh` can copy skills from a source repo of yours; the audit runs `sync.sh --check`.
 - Nothing in the core points at a private repo. The link is only the recorded profile path on each computer.
 
+## Flows
+
+The setup runs four flows as loops with no person in them. Details: `docs/flows.md`.
+
+| Flow | Skills | Trigger | Loop |
+|---|---|---|---|
+| Start the day | `start-work` | routine `morning-prep`, `/start-work`, `/autonomy run morning-prep` | housekeeping, inbox, plan, start the work for tickets that are not blocked and not needs-you |
+| Do the work | `paralel`, `merge-when-green` | `ci-watch` event, `/autonomy run lane <ticket>` | work, PR, reviewer, fix red CI (3 tries), merge on green, deploy check, verify on staging, close, cleanup. Ends `done` or `needs-you` |
+| After the merge | `deploy`, `cleanup` | event after a merge; routine `nightly-cleanup` | staging deploy, verify, evidence on the ticket, remove the worktree |
+| Change the setup | `ship-mod`, `setup-audit`, `sync-prefs` | routines, `/ship-mod` | local-first: edit the mod in the main checkout, `/reload-plugins`, one PR after approval |
+
+- **Kill switch:** the file `~/.claude/autonomy.off` stops all loops. `/autonomy off` and `/autonomy on` set it. `/autonomy status` shows it.
+- **Manual trigger:** `/autonomy run <loop>` runs one loop once.
+- **Limits:** at most 3 automatic fix tries for each PR, then `needs-you` with a decision record.
+- **Automatic in company repos:** merge on green under `merge-policy`, staging deploy, staging verify.
+- **Manual gates:** a production release (a release tag), messages to other people, money, secrets, sign-ins, destructive data actions. They appear only as decision records.
+
 ## Overview
 
 | Part | Where | What |
@@ -25,19 +42,21 @@ A Claude Code setup in two layers, two repos:
 | Answer format | `claude/CLAUDE.md`, `claude/output-styles/ste.md` | All answers in ASD-STE100 Simplified Technical English |
 | Profile rules | `profiles/<name>/profile.md` | Linked to `~/.claude/profile.md`; the core `CLAUDE.md` imports it |
 | Settings | `claude/settings.json` (+ the profile's `settings.json`) | Plugins, output style, effort, permissions; merged on install |
-| Start the day | `claude/skills/start-work` | `/start-work`: housekeeping of every project in `~/Projects`, inbox (PRs, plus extra sources from the profile), one plan, lanes, Work Monitor |
-| Watch and ship | `claude/skills/monitor`, `deploy`, `pr-sweep` | `/monitor`: sessions, PRs with CI, deploys. `/deploy`: wait for staging, test, report how far it got. `/pr-sweep`: fix comments, conflicts, red CI |
-| Merge | `claude/skills/merge-when-green` | `/merge-when-green`: merge one PR when CI is green; waits with ci-watch, stops on red CI, a conflict, a draft or requested changes |
+| Start the day | `claude/skills/start-work` | `/start-work`: housekeeping of every project in `~/Projects`, inbox (PRs, plus extra sources from the profile), one plan, then starts the work for tickets that are not blocked and not needs-you, Work Monitor |
+| Watch and ship | `claude/skills/monitor`, `deploy`, `pr-sweep` | `/monitor`: sessions, PRs with CI, deploys. `/deploy`: wait for staging, test, report how far it got; starts by itself after a merge. `/pr-sweep`: fix comments, conflicts, red CI |
+| Merge | `claude/skills/merge-when-green` | `/merge-when-green`: merge one PR when CI is green (the merge stage of the lane loop); waits with ci-watch, stops on red CI, a conflict, a draft or requested changes |
 | Ship | `claude/skills/ship-mod` | `/ship-mod`: commit, push, PR, merge on green, pull main and install the mods |
 | Browser | `claude/skills/start-browser`, `test-in-chrome` | `/start-browser`: check the Chrome bridge, open one tab for this session. `/test-in-chrome`: run a test plan in the real Chrome and report pass or fail per step with evidence |
-| Clean | `claude/skills/cleanup` | Remove dead worktrees, archive finished sessions |
+| Clean | `claude/skills/cleanup` | Remove dead worktrees, archive finished sessions; runs right after a merge for that lane, and nightly |
+| Autonomy | `claude/skills/autonomy` | `/autonomy status`: loops, last and next run, the kill switch. `/autonomy off [reason]` and `/autonomy on`: the kill switch `~/.claude/autonomy.off`. `/autonomy run <loop>`: the manual trigger, runs one loop once. `/autonomy run lane <ticket>`: the lane loop for one ticket. Needs `claude/scripts/autonomy.sh` |
 | Repo care | `claude/skills/setup-audit` | `/setup-audit`: read-only audit of this repo |
 | Preferences sync | `claude/skills/sync-prefs`, `claude/scripts/prefs-sync.sh`, `routines/prefs-sync.md` | `/sync-prefs`: one way, local to repo. Your `settings.json` keys, the button row, the project files and the desktop app preferences go to one PR on `prefs/sync`. Never merges, never changes local files |
 | Desktop app settings | `claude/desktop-settings.json` | A snapshot of the Claude desktop app preferences (auto-archive, branch prefix, notifications, keep-awake). The installer does not apply it: ask Claude to apply it with the app's settings tool |
+| Flows | `docs/flows.md` | The four flows as loops: triggers, kill switch, limits, manual gates. See "Flows" below |
 | Cheat sheet | `mods/cheatsheet` | `/cheat` and a button row above the prompt |
-| Routines | `routines/` | Prompts for scheduled tasks: nightly-cleanup, morning-prep, weekly-setup-audit, weekly-claude-releases, prefs-sync, project-daily |
+| Routines | `routines/` | Prompts for scheduled tasks: nightly-cleanup, morning-prep, weekly-setup-audit, weekly-claude-releases, prefs-sync, project-daily, daily-digest, sweep, config-loop. `autonomy.sh` is the kill switch and the manual run |
 | Claude releases | `docs/claude-releases.md`, `docs/claude-releases-improvements.md`, `docs/claude-releases-proposals.md`, `routines/weekly-claude-releases.md` | A digest page with three tabs: **Releases** (the big Claude features and workflow changes, by month, newest first), **Improvements** (the updates that were merged to this setup) and **Proposals** (changes that the releases suggest, with the gain and the risk). The weekly routine updates all three, republishes the artifact (URL in `docs/claude-releases-url`) and opens one PR |
-| CI | `.github/workflows/ci.yml`, `tests/` | Three jobs run: `checks` and `mods` in parallel, then the gate `check`. `checks` runs on Linux and on Windows: shell syntax, JSON, skill frontmatter, and every `tests/*.sh` except `mods.sh` (shellcheck runs on Linux only). A new test file runs with no change to the workflow. The tests are `install-check`, `audit-link`, `list-projects`, `prefs-sync`, `morning-project`, `core-clean`, `mem-budget`, `merge-when-green` and `inventory`. `inventory` fails when a skill, mod, routine, script or test file is not named here. `mods` runs on Linux: it runs `tests/mods.sh`. `check` is the one gate that `main` requires: it fails unless `checks` and `mods` both succeed. A new push cancels the old run of a pull request |
+| CI | `.github/workflows/ci.yml`, `tests/` | Three jobs run: `checks` and `mods` in parallel, then the gate `check`. `checks` runs on Linux and on Windows: shell syntax, JSON, skill frontmatter, and every `tests/*.sh` except `mods.sh` (shellcheck runs on Linux only). A new test file runs with no change to the workflow. The tests are `install-check`, `audit-link`, `list-projects`, `prefs-sync`, `morning-project`, `core-clean`, `mem-budget`, `merge-when-green`, `autonomy` and `inventory`. `inventory` fails when a skill, mod, routine, script or test file is not named here. `mods` runs on Linux: it runs `tests/mods.sh`. `check` is the one gate that `main` requires: it fails unless `checks` and `mods` both succeed. A new push cancels the old run of a pull request |
 | Agents | `claude/agents/pr-reviewer.md` | The one custom subagent |
 
 ## The flow of a change
@@ -143,7 +162,7 @@ The caveman plugin and its marketplace are not in the settings, because caveman 
 |---|---|
 | `claude/skills/` | Generic skills. `~/.claude/skills` links to these folders; a new folder needs no list. |
 | `claude/agents/` | `pr-reviewer`, the one user-level subagent |
-| `claude/scripts/` | statusline-command.sh, merge-when-green.sh (`-R owner/repo`, `-m method`), mem-budget.sh, list-projects.sh |
+| `claude/scripts/` | statusline-command.sh, merge-when-green.sh (`-R owner/repo`, `-m method`), mem-budget.sh, list-projects.sh, autonomy.sh (`check`, `off`, `on`, `status`, `stamp`, `run <loop>`) |
 | `claude/settings.json` | Settings that `install.sh` merges into `~/.claude/settings.json` |
 | `profiles/example/` | The layout of a profile: `profile.md`, `settings.json`, `projects.conf`, `skills/`, `start-work.d/`, `mods/`, optional `merge-policy.json`, `sync.sh` and `docs/`. Your real profile is a private repo with this layout |
 

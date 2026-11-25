@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawOverview, drawProgress, groupSessions, sessionHue, tidyTitle, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawProgress, groupSessions, sessionHue, tidyTitle, toDecisions, deadlineWords, clockOf, defaultMark, decisionLines, drawOverview, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import type { Decision } from '../types'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -486,4 +487,70 @@ test('the progress of a session has one segment for each step and a hover text f
   expect(d.source).toContain('<title>Fix: now</title>')
   expect(d.source).toContain('<title>Test: to do</title>')
   expect(drawProgress({ steps: [], status: 'idle' }, '#8b949e').source).toContain('no plan yet')
+})
+
+const DECISION: Decision = { id: 'd1', ticket: 'SN-12', question: 'Release to production?', options: ['Release now', 'Wait'], default: 'Wait', deadline: '2026-11-22T18:00:00Z', reversible: false }
+
+test('toDecisions reads a JSON text or an array, and ignores items that are not records', () => {
+  expect(toDecisions([DECISION])).toEqual([DECISION])
+  expect(toDecisions(JSON.stringify([DECISION]))).toEqual([DECISION])
+  expect(toDecisions('not json')).toEqual([])
+  expect(toDecisions({ id: 'x' })).toEqual([])
+  const bad = [
+    null,
+    'text',
+    { ...DECISION, id: '' },
+    { ...DECISION, question: 7 },
+    { ...DECISION, options: ['one'] },
+    { ...DECISION, options: ['a', 'b', 'c'] },
+    { ...DECISION, options: ['a', 2] },
+    { ...DECISION, deadline: 'soon' },
+    { ...DECISION, reversible: 'yes' },
+    { ...DECISION, ticket: 5 },
+  ]
+  const { ticket: _ticket, ...noTicket } = DECISION
+  expect(toDecisions([...bad, { ...DECISION, id: 'ok', ticket: null }])).toEqual([{ ...noTicket, id: 'ok' }])
+  expect(toDecisions(Array.from({ length: 20 }, (_, i) => ({ ...DECISION, id: `d${i}` }))).length).toBe(12)
+})
+
+test('deadlineWords gives the time to the deadline in one unit, or overdue', () => {
+  const now = Date.parse('2026-11-22T12:00:00Z')
+  expect(deadlineWords('2026-11-22T15:00:00Z', now)).toBe('in 3h')
+  expect(deadlineWords('2026-11-22T12:25:00Z', now)).toBe('in 25m')
+  expect(deadlineWords('2026-11-22T12:00:10Z', now)).toBe('in 1m')
+  expect(deadlineWords('2026-11-24T12:00:00Z', now)).toBe('in 2d')
+  expect(deadlineWords('2026-11-22T11:00:00Z', now)).toBe('overdue')
+  expect(deadlineWords('2026-11-22T12:00:00Z', now)).toBe('overdue')
+  expect(deadlineWords('soon', now)).toBe('no deadline')
+  expect(clockOf('2026-11-22T18:00:00Z')).toMatch(/^\d\d:\d\d$/)
+  expect(clockOf('soon')).toBe('')
+})
+
+test('decisionLines give the options, the default and what occurs at the deadline', () => {
+  const now = Date.parse('2026-11-22T15:00:00Z')
+  expect(defaultMark(DECISION)).toBe('b')
+  expect(defaultMark({ ...DECISION, default: 'Release now' })).toBe('a')
+  expect(defaultMark({ ...DECISION, default: 'Ask the team' })).toBe('Ask the team')
+  const [choices, when] = decisionLines(DECISION, now)
+  expect(choices).toBe('a) Release now  b) Wait')
+  expect(when).toMatch(/^default b · by \d\d:\d\d · in 3h · waits for you$/)
+  expect(decisionLines({ ...DECISION, reversible: true }, now)[1]).toMatch(/default runs at the deadline$/)
+  expect(decisionLines(DECISION, Date.parse('2026-11-23T00:00:00Z'))[1]).toContain('overdue')
+})
+
+test('the hero card keeps its last step and gives the open decisions in the tooltip only', () => {
+  const base = { id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [] }
+  const plain = drawPhases(base).source
+  const withOpen = drawPhases({ ...base, decisions: [DECISION, { ...DECISION, id: 'd2' }] }).source
+  expect(plain).not.toContain('decision')
+  expect(withOpen).toContain('<title>done · 2 decisions open: waits</title>')
+  // The text under the last step does not change.
+  expect(withOpen.replace(' · 2 decisions open', '')).toBe(plain)
+})
+
+test('merge keeps the next action of a row, and the demo shows next actions and decisions', () => {
+  const rows = merge<{ id: string; title: string; state: string; next?: string }>([], 'r1', 'set', { title: 't', state: 'review', next: 'CI watch: fix try 2 of 3 · 6 min' }, ['title', 'state', 'next'], [])
+  expect(rows[0]?.next).toBe('CI watch: fix try 2 of 3 · 6 min')
+  expect(demoBoard(10, 0).rows.some(r => r.next !== undefined)).toBe(true)
+  expect(demoBoard(10, 0).decisions?.length).toBe(2)
 })

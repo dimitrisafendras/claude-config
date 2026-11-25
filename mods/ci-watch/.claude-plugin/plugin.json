@@ -1,7 +1,7 @@
 {
   "name": "ci-watch",
-  "version": "0.2.1",
-  "description": "Watches the CI of your pull requests and starts a turn when a PR turns red, conflicts or is green to merge, so no agent sleep-polls CI. The option fix_turns=off keeps the notifications and starts no turn for red CI and conflicts. Other mods and the model add a PR through the tool mcp__ci-watch__watch.",
+  "version": "0.3.0",
+  "description": "Watches the CI of your pull requests and starts a turn when a PR turns red, conflicts or is green to merge, so no agent sleep-polls CI. With loop=on (the default) it runs the lane loop: at most 3 fix tries per PR, merge on green under merge-policy, a watch of the deploy run of the merge commit, a staging verify turn, then one close-and-cleanup turn; at most 60 automatic turns a day, and no turn while ~/.claude/autonomy.off exists. fix_turns=off keeps the notifications and starts no turn for red CI and conflicts. Other mods and the model add a PR through the tool mcp__ci-watch__watch.",
   "author": {
     "name": "claude-config"
   },
@@ -13,6 +13,16 @@
       "type": "string",
       "title": "Fix turns",
       "description": "on: a red or conflicted PR starts a turn that fixes it. off: it only gets a toast and a notification; use off when another watcher (the desktop app Auto-fix) does the fix. The green path is the same for the two values.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    "loop": {
+      "type": "string",
+      "title": "Lane loop",
+      "description": "on: the lane loop (fix tries counted to 3, decision records, merge under merge-policy, deploy watch, verify, close and cleanup turns, a cap of 60 automatic turns a day). off: ci-watch acts as in 0.2 (the kill switch file still stops every turn).",
       "options": [
         "on",
         "off"

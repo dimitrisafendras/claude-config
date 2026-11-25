@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolCallArgs } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
+import { dayOf } from '../hooks/register'
 
 // Nothing sits beneath the plugin: these hooks stand for the engine and gh.
 
@@ -36,13 +37,29 @@ type World = {
   toasts: string[]
   notes: string[]
   statuses: (string | undefined)[]
-  gh: { pr: unknown; rateLimited: boolean; calls: string[][] }
+  gh: { pr: unknown; runs: unknown[]; rateLimited: boolean; calls: string[][] }
+  /** True: the kill switch file ~/.claude/autonomy.off exists. */
+  off: boolean
+  /** What a Bash call beneath the plugin answers. */
+  bash: Record<string, unknown>
 }
 
-function world(on: On): World {
-  const w: World = { clock: mock.clock(on), prompts: [], toasts: [], notes: [], statuses: [], gh: { pr: RED, rateLimited: false, calls: [] } }
-  mock.store(on)
+function world(on: On, opts: { now?: number; store?: Record<string, unknown> } = {}): World {
+  const w: World = {
+    clock: mock.clock(on, { now: opts.now ?? 0 }),
+    prompts: [],
+    toasts: [],
+    notes: [],
+    statuses: [],
+    gh: { pr: RED, runs: [], rateLimited: false, calls: [] },
+    off: false,
+    bash: { result: { stdout: 'ok', stderr: '', interrupted: false } },
+  }
+  mock.store(on, opts.store)
   mock.env(on, { HOME: '/home/me' })
+  on('fs.exists', (_, e) => ({ value: w.off && e.path === '/home/me/.claude/autonomy.off' }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 's1' }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -70,12 +87,13 @@ function world(on: On): World {
     if (argv[0] !== 'gh') return { value: { exitCode: 1, stdout: '', stderr: 'no', isStdoutTruncated: false, isStderrTruncated: false } }
     let r: Gh
     if (w.gh.rateLimited) r = { exitCode: 1, stdout: '', stderr: 'HTTP 403: API rate limit exceeded' }
+    else if (argv[1] === 'run' && argv[2] === 'list') r = ok(w.gh.runs)
     else if (argv.includes('-R')) r = ok(w.gh.pr)
     else if (argv[3] === '--json' && argv[4]?.includes('headRefName')) r = ok({ number: 5, url: 'https://github.com/o/r/pull/5', headRefName: 'feat' })
     else r = ok({ number: 5, url: 'https://github.com/o/r/pull/5' })
     return { value: { ...r, isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  on('tool.call', () => ({ result: { stdout: 'ok', stderr: '', interrupted: false } }))
+  on('tool.call', () => w.bash as { result: unknown })
   return w
 }
 
@@ -103,7 +121,7 @@ test('add, then a red check starts a turn with the failed check and run id', asy
   expect(w.prompts.length).toBe(1)
 })
 
-test('green notifies without a turn; auto-merge on asks to merge', async ($, on) => {
+test('green notifies without a turn; auto-merge on asks to merge', { options: { loop: 'off' } }, async ($, on) => {
   const w = world(on)
   w.gh.pr = GREEN
   await $.session.start(START)
@@ -177,7 +195,7 @@ const check = async ($: Engine, w: World) => {
   await w.clock.advance(1)
 }
 
-test('fix_turns on: a conflict starts a turn, with no toast', { options: { fix_turns: 'on' } }, async ($, on) => {
+test('fix_turns on: a conflict starts a turn, with no toast', { options: { fix_turns: 'on', loop: 'off' } }, async ($, on) => {
   const w = world(on)
   w.gh.pr = CONFLICT
   await $.session.start(START)
@@ -217,7 +235,7 @@ test('fix_turns off: a conflict gets a toast and a notification, and no turn', {
   expect(w.notes).toEqual(['o/r#5 has merge conflicts'])
 })
 
-test('fix_turns off: the green path does not change', { options: { fix_turns: 'off' } }, async ($, on) => {
+test('fix_turns off: the green path does not change', { options: { fix_turns: 'off', loop: 'off' } }, async ($, on) => {
   const w = world(on)
   w.gh.pr = GREEN
   await $.session.start(START)
@@ -240,4 +258,243 @@ test('the watch tool can switch auto-merge on for the PR', async ($, on) => {
   const list = await $.command.run({ command: 'ci-watch', args: 'list', ...RUN })
   expect(list.text).toContain('o/r#9')
   expect(list.text).toContain('(auto-merge on)')
+})
+
+// ---------- the lane loop (option loop, default on) ----------
+
+const redRun = (id: number) => ({
+  ...RED,
+  statusCheckRollup: [
+    { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: `https://github.com/o/r/actions/runs/${id}/job/1` },
+  ],
+})
+const MERGED = { ...GREEN, state: 'MERGED', title: '[SN-12] Fix it', mergeCommit: { oid: 'abc1234def567' } }
+const deployRun = (status: string, conclusion: string) => [
+  { databaseId: 901, status, conclusion, workflowName: 'Deploy staging', url: 'https://github.com/o/r/actions/runs/901' },
+  { databaseId: 900, status: 'completed', conclusion: 'failure', workflowName: 'lint', url: 'https://github.com/o/r/actions/runs/900' },
+]
+const list = async ($: Engine) => (await $.command.run({ command: 'ci-watch', args: 'list', ...RUN })).text ?? ''
+
+test('loop: fix tries count to 3, then one last turn writes a decision record', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = redRun(777)
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  w.gh.pr = redRun(778)
+  await check($, w)
+  w.gh.pr = CONFLICT
+  await check($, w)
+  expect(w.prompts.length).toBe(3)
+  expect(w.prompts[0]).toContain('This is fix try 1 of 3 for o/r#5. Write `next` on the ticket row: "CI watch: fix try 1 of 3".')
+  expect(w.prompts[1]).toContain('fix try 2 of 3')
+  expect(w.prompts[2]).toContain('has merge conflicts with main')
+  expect(w.prompts[2]).toContain('fix try 3 of 3')
+  expect(await list($)).toContain('o/r#5 conflict (fix try 3 of 3)')
+
+  w.gh.pr = redRun(779)
+  await check($, w)
+  expect(w.prompts.length).toBe(4)
+  const last = w.prompts[3] ?? ''
+  expect(last).toContain('o/r#5 is red again after 3 automatic fix tries. Stop fixing it')
+  expect(last).toContain('Mark the ticket needs-you.')
+  const rec = JSON.parse(/(\{"id".*?\}) Mark/.exec(last)?.[1] ?? '{}')
+  expect(Object.keys(rec)).toEqual(['id', 'ticket', 'question', 'options', 'default', 'deadline', 'reversible'])
+  expect(rec.options.length).toBe(2)
+  expect(rec.options).toContain(rec.default)
+
+  // After the last turn: a toast only, no fifth turn.
+  w.gh.pr = redRun(780)
+  await check($, w)
+  expect(w.prompts.length).toBe(4)
+  expect(w.toasts.at(-1)).toBe('o/r#5 is red; ci-watch stopped fixing it after 3 tries')
+  expect(await list($)).toContain('stopped: needs-you')
+})
+
+test('loop: the kill switch file stops every turn and says nothing; the event waits', async ($, on) => {
+  const w = world(on)
+  w.off = true
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  await check($, w)
+  expect(w.prompts).toEqual([])
+  expect(w.toasts).toEqual([])
+  expect(w.notes).toEqual([])
+  expect(await list($)).toContain('kill switch on')
+
+  w.off = false
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('fix try 1 of 3')
+})
+
+test('the kill switch also holds the turns of loop off', { options: { loop: 'off' } }, async ($, on) => {
+  const w = world(on)
+  w.off = true
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.prompts).toEqual([])
+  w.off = false
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).not.toContain('fix try')
+})
+
+test('loop: the daily cap of 60 turns stores one decision record and resets at local midnight', async ($, on) => {
+  const now = new Date(2026, 10, 25, 23, 50).getTime()
+  const w = world(on, { now, store: { 'loop/day': { day: dayOf(now), count: 59 } } })
+  w.gh.pr = redRun(777)
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(await list($)).toContain('60 of 60 automatic turns today')
+
+  w.gh.pr = CONFLICT
+  await check($, w)
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  const capped = w.toasts.filter(t => t.includes('daily cap reached'))
+  expect(capped.length).toBe(1)
+  const shown = await list($)
+  expect(shown).toContain('decision: {"id":"ci-watch-cap-')
+  expect(shown).toContain('"question":"daily cap reached')
+  expect(shown).toContain('"reversible":true')
+
+  // Past local midnight the held conflict starts its turn.
+  await w.clock.advance(15 * 60_000)
+  expect(w.prompts.length).toBe(2)
+  expect(w.prompts[1]).toContain('has merge conflicts')
+  expect(await list($)).toContain('1 of 60 automatic turns today')
+})
+
+test('loop: the merge turn obeys merge-policy; a refused merge gets a decision record', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = { ...GREEN, title: '[SN-12] Fix it' }
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await $.command.run({ command: 'ci-watch', args: 'auto-merge 5 on', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('ci-watch: o/r#5 is green and mergeable; merge it per the repo rules.')
+  expect(w.prompts[0]).toContain('under merge-policy')
+  expect(w.prompts[0]).toContain('the refusal is final')
+
+  w.bash = { deny: 'merge-policy: o/r#5 not merged: review required' }
+  const ran = await $.tool.call({ tool: 'Bash', command: 'gh pr merge 5 -R o/r --squash' })
+  expect(ran.deny).toContain('merge-policy: o/r#5 not merged: review required')
+  expect(ran.deny).toContain('ci-watch: the merge of o/r#5 was refused')
+  expect(ran.deny).toContain('do not retry and do not work around it')
+  expect(ran.deny).toContain('"ticket":"SN-12"')
+  expect(ran.deny).toContain('Mark the ticket needs-you.')
+  expect(await list($)).toContain('merge refused')
+
+  // No new merge turn for the refused PR.
+  w.gh.pr = PENDING
+  await check($, w)
+  w.gh.pr = GREEN
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+})
+
+test('loop: a merge starts the deploy watch; success starts verify, its end starts close and cleanup', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = MERGED
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.toasts).toContain('o/r#5 is merged; ci-watch watches its deploy')
+  expect(w.prompts).toEqual([])
+
+  w.gh.runs = deployRun('in_progress', '')
+  await check($, w)
+  expect(w.prompts).toEqual([])
+  expect(w.gh.calls.some(c => c.join(' ').startsWith('gh run list --commit abc1234def567 -R o/r'))).toBe(true)
+  expect(w.statuses.at(-1)).toBe('ci 1 deploying')
+
+  w.gh.runs = deployRun('completed', 'success')
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  const verify = w.prompts[0] ?? ''
+  expect(verify).toContain('ci-watch: verify o/r#5 on staging.')
+  expect(verify).toContain('Run the `deploy` skill steps for this PR on staging')
+  expect(verify).toContain('attach the evidence')
+  expect(verify).toContain('the ticket SN-12')
+
+  await $.turn.start({ text: verify, turnId: 't-verify' })
+  await $.turn.complete({ turnId: 't-verify', answer: 'verified on staging', durationMs: 1, isAborted: false, reason: 'answer' })
+  await w.clock.advance(1)
+  expect(w.prompts.length).toBe(2)
+  expect(w.prompts[1]).toContain('ci-watch: close and clean up after o/r#5. The verify turn ended.')
+  expect(w.prompts[1]).toContain('close the ticket SN-12 (the ticket-closer mod asks first)')
+  expect(w.prompts[1]).toContain('Run the `cleanup` skill rules for this lane')
+  expect(await list($)).toContain('0 PR(s) watched')
+})
+
+test('loop: a failed deploy is fix try N of 3 on a follow-up PR, which takes over the count', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = MERGED
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  w.gh.runs = deployRun('completed', 'failure')
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('ci-watch: the deploy of o/r#5 failed: run "Deploy staging"')
+  expect(w.prompts[0]).toContain('This is fix try 1 of 3.')
+  expect(w.prompts[0]).toContain('gh run view 901 --log-failed -R o/r')
+  expect(w.prompts[0]).toContain('follows "o/r#5"')
+
+  const r = await $.tool.call({ tool: 'mcp__ci-watch__watch', pr: 'o/r#6', auto_merge: true, follows: 'o/r#5' } as unknown as ToolCallArgs)
+  expect(String(r.result)).toContain('It takes over the fix tries of o/r#5: 1 of 3 used.')
+  const shown = await list($)
+  expect(shown).toContain('o/r#6 not checked yet (fix try 1 of 3, auto-merge on)')
+  expect(shown).not.toContain('o/r#5')
+})
+
+test('loop: a failed deploy after 3 fix tries writes a decision record', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  for (const id of [777, 778, 779]) {
+    w.gh.pr = redRun(id)
+    await check($, w)
+  }
+  w.gh.pr = MERGED
+  await check($, w)
+  w.gh.runs = deployRun('completed', 'failure')
+  await check($, w)
+  expect(w.prompts.length).toBe(4)
+  expect(w.prompts[3]).toContain('ci-watch: the deploy of o/r#5 failed again after 3 automatic fix tries')
+  expect(w.prompts[3]).toContain('"ticket":"SN-12"')
+  expect(w.prompts[3]).toContain('Mark the ticket needs-you.')
+  expect(await list($)).toContain('0 PR(s) watched')
+})
+
+test('loop: no deploy run in 20 minutes goes straight to close and cleanup', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = MERGED
+  w.gh.runs = [{ databaseId: 900, status: 'completed', conclusion: 'success', workflowName: 'tests' }]
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  await w.clock.advance(10 * 60_000)
+  expect(w.prompts).toEqual([])
+  await w.clock.advance(12 * 60_000)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('No deploy workflow ran for abc1234 in 20 minutes')
+  expect(w.prompts[0]).toContain('cleanup')
+})
+
+test('loop off: a merged PR leaves the list, as before', { options: { loop: 'off' } }, async ($, on) => {
+  const w = world(on)
+  w.gh.pr = MERGED
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.toasts).toContain('o/r#5 is merged; ci-watch stopped watching it')
+  expect(await list($)).toContain('0 PR(s) watched')
+  expect(w.gh.calls.some(c => c[1] === 'run')).toBe(false)
 })

@@ -25,6 +25,7 @@ Sources (read all of them for the last 7 days; the start date is the newest "Cov
 4. The Claude Platform release notes, `https://docs.claude.com/en/release-notes/overview`: API, Agent SDK, MCP and Managed Agents items.
 
 Steps:
+0. Run `bash ~/.claude/autonomy.sh check`. If it fails, stop and say nothing.
 1. Make the worktree: `git fetch -q origin`, then `git worktree add -B docs/claude-releases <tmp-dir> origin/main`. If the remote branch `docs/claude-releases` exists, start from it instead.
 2. Read the sources. Keep only two kinds of items, and be strict: most weeks have zero to three.
    - Big features: a new model that becomes a default, a new kind of extension (such as mods), a new built-in command, skill or mod, a new way to run agents or sessions.
@@ -58,3 +59,4 @@ Steps:
 12. Remove the worktree.
 13. Write the report to `~/.claude/routines/reports/weekly-claude-releases-<YYYY-MM-DD>.md`: the PR link, the number of new items with their names, the proposals, the upkeep findings, the artifact URL, and the sources that failed.
 14. On any doubt, stop and end after writing what you have.
+15. Run `bash ~/.claude/autonomy.sh stamp weekly-claude-releases`.
