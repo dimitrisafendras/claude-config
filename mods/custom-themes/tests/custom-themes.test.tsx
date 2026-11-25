@@ -15,6 +15,8 @@ const SETS: ThemeSetArgs[] = []
 let clears = 0
 let isStyleRefused = false
 let percent: number | undefined = 0
+// The compaction-window percent of the breakdown; absent, the mock has no breakdown.
+let windowPercent: number | undefined
 let isPlaced = true
 
 // Each hook here stands for the engine, beneath the mod.
@@ -23,9 +25,10 @@ function world(on: On, stored: Record<string, unknown> = {}): ReturnType<typeof 
   clears = 0
   isStyleRefused = false
   percent = 0
+  windowPercent = undefined
   isPlaced = true
   const clock = mock.clock(on, { now: Date.parse('2026-12-24T18:00:00Z') })
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000, ...(percent === undefined ? {} : { percent }) }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000, ...(percent === undefined ? {} : { percent }), ...(windowPercent === undefined ? {} : { breakdown: { percentage: windowPercent } as never }) }, rateLimits: [] } }))
   mock.store(on, stored)
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -119,6 +122,22 @@ test('the backdrop draws the applied scene and follows the context fill', async 
   const other = await $.ui.mount({ ...backdrop('navy'), props: { scene: 'navy', plugin: 'other', glass: false }, surface: 'desktop' })
   expect(await drawn(other)).toBe('')
   await other.unmount()
+})
+
+test('the fill follows the compaction window when the breakdown has it', async ($, on) => {
+  world(on)
+  await $.session.start(START)
+  await cmd($, 'christmas-night')
+  const ui = await $.ui.mount({ ...backdrop(XMAS.id), surface: 'desktop' })
+  percent = 30
+  await $.turn.start({ text: 'Work', turnId: 't1' })
+  const low = await drawn(ui)
+  // 30% of the model window is 50% of a smaller compaction window: the scene follows the second figure.
+  windowPercent = 50
+  await $.turn.start({ text: 'More', turnId: 't2' })
+  expect(await drawn(ui)).toContain('50%')
+  expect(low).toContain('30%')
+  await ui.unmount()
 })
 
 test('the fill is also read on the timer, so /clear lowers the snow', async ($, on) => {
