@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawOverview, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -394,4 +394,14 @@ test('reportPrompts puts the prompts said again first, and gives the share of re
   expect(r.since).toBe(5)
   expect(reportPrompts([])).toMatchObject({ total: 0, share: 0, since: 0 })
   expect(automateText(list[1]!)).toContain('5 times: "b"')
+})
+
+test('drawOverview draws one arc for each group and gives the share that is done', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const rows = [row('a', 'verified'), row('b', 'merged'), row('c', 'running'), row('d', 'queued')]
+  const drawing = drawOverview(rows)
+  expect(drawing.source).toContain('50%')
+  expect(drawing.source).toContain('2 of 4 done')
+  expect(drawing.source.match(/stroke-dasharray/g)).toHaveLength(3)
+  expect(drawOverview([]).source).toContain('0%')
 })
