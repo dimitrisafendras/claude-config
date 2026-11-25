@@ -10,6 +10,7 @@ This folder is a small example to copy. Keep your real profile in a private repo
 | Permissions and plugins | `settings.json` | Merged into `~/.claude/settings.json` after the core settings; the permission lists are joined |
 | Projects | `projects.conf` | Surfaces and roles of your projects (`<folder> <surfaces> [board]`); copied once to `~/.claude/`, yours to edit |
 | Pages | `work-monitor-url`, `cheat-sheet-url`, `cheat-buttons.json` | The Work Monitor and cheat sheet artifacts, and the button row; copied once to `~/.claude/` |
+| Merge policy (optional) | `merge-policy.json` | A profile MAY hold its own `merge-policy.json`: the rules of the `merge-policy` mod. `install.sh` copies it once to `~/.claude/` and never overwrites it. The file gives permission to merge with no prompt for the repos in it, so this example ships none on purpose. The format is in `mods/merge-policy/merge-policy.example.json` |
 | Extra sources | `start-work.d/*.md` | One file per source for `/start-work` (a ticket board, an error tracker): how to check its connection, collect rows, classify them |
 | Skills | `skills/*/SKILL.md` | Skills that only your projects need; linked into `~/.claude/skills/` |
 | Mods | `mods/*/` with `.claude-plugin/marketplace.json` | Mods that only your projects need; `./install.sh --mods` installs them from the profile's own marketplace |
