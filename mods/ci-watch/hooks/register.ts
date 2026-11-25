@@ -58,6 +58,7 @@ type Check = {
   state?: string
   detailsUrl?: string
   targetUrl?: string
+  startedAt?: string
 }
 
 type PrView = {
@@ -110,10 +111,30 @@ const keyOf = (owner: string, r: { repo: string; number: number }) =>
 const FAIL = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
 const PENDING_STATE = new Set(['PENDING', 'EXPECTED'])
 
+/**
+ * True when a cancelled run was replaced: a run of the same check that did not start before it is in progress or
+ * has a result other than CANCELLED. A workflow with a concurrency rule cancels its older run on each new event,
+ * and the pull request then lists the two runs. Only the newer run says if the check passed.
+ */
+function isSuperseded(c: Check, all: Check[]): boolean {
+  if (c.conclusion !== 'CANCELLED') return false
+
+  return all.some(
+    o =>
+      o !== c &&
+      o.name === c.name &&
+      o.workflowName === c.workflowName &&
+      o.conclusion !== 'CANCELLED' &&
+      (o.startedAt === undefined || c.startedAt === undefined || o.startedAt >= c.startedAt),
+  )
+}
+
 export function verdictOf(pr: PrView): { verdict: Verdict; failed: Failed[]; pending: number } {
   const failed: Failed[] = []
   let pending = 0
-  for (const c of pr.statusCheckRollup ?? []) {
+  const checks = pr.statusCheckRollup ?? []
+  for (const c of checks) {
+    if (isSuperseded(c, checks)) continue
     const name = c.name ?? c.context ?? 'check'
     const url = c.detailsUrl ?? c.targetUrl
     const runId = url ? /\/actions\/runs\/(\d+)/.exec(url)?.[1] : undefined
