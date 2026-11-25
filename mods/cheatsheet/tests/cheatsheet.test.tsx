@@ -12,20 +12,23 @@ let CONFIG: string | undefined
 const BAND = { plugin: 'cheatsheet', component: 'AbovePrompt', props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} } } as const
 
 const SEEN: string[] = []
+const READS: string[] = []
 
-function world(on: On): void {
+function world(on: On, env: Record<string, string> = { HOME: '/home/me' }): void {
   CONFIG = undefined
   SEEN.length = 0
+  READS.length = 0
   on('command.run', { command: 'setup-audit' }, (_, e) => (SEEN.push(`run:${e.command} ${e.args}`.trim()), { text: 'ok' }))
   on('ui.toast', (_, e) => (SEEN.push(`toast:${e.text}`), { value: undefined }))
   on('prompt.fill', (_, e) => (SEEN.push(`fill:${e.text}`), { isFilled: true }))
 
-  mock.env(on, { HOME: '/home/me' })
+  mock.env(on, env)
   mock.store(on)
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('fs.list', () => ({ value: Object.keys(SKILLS).map(name => ({ name, kind: 'other' as const, size: 0, mtimeMs: 0, isLink: true })) }))
   on('fs.read', (_, e) => {
+    READS.push(e.path.replace(/\\/g, '/'))
     if (e.path.endsWith('cheat-sheet-url')) return { value: 'https://example.test/sheet\n' }
     if (e.path.endsWith('cheat-buttons.json')) {
       if (CONFIG === undefined) throw new Error('ENOENT')
@@ -110,4 +113,15 @@ test('a button fills the prompt; a send button runs the command', async ($, on) 
   await ui.press({ key: '/setup-audit' })
   await ui.unmount()
   expect(SEEN).toEqual(['fill:/start-work ', 'run:setup-audit'])
+})
+
+test('with no HOME (Windows) the buttons come from USERPROFILE', async ($, on) => {
+  world(on, { USERPROFILE: 'C:\\Users\\me' })
+  CONFIG = JSON.stringify({ buttons: [{ label: 'mine', command: '/paralel' }] })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  expect(READS).toContain('C:/Users/me/.claude/cheat-buttons.json')
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await ui.find({ type: 'Button', text: /mine/ }))?.text).toContain('mine')
+  expect(await ui.find({ type: 'Button', text: /^day$/ })).toBeUndefined()
+  await ui.unmount()
 })
