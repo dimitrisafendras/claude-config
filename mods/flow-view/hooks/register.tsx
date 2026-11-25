@@ -1302,6 +1302,23 @@ export function bucket(state: string): View['filter'] {
 }
 
 /** Today: the phases of the day as a pipeline. */
+export type PhasePart = { key: string; label: string; hue: string; n: number }
+
+/** The tickets of the day in the parts that the stepper shows. A blocked or failed ticket is its own part. */
+export function phaseParts(rows: Ticket[]): PhasePart[] {
+  const isStuck = (t: Ticket) => t.state === 'blocked' || t.state === 'failed'
+  const count = (group: View['filter']) => rows.filter(t => bucket(t.state) === group && !isStuck(t)).length
+
+  return [
+    { key: 'done', label: 'done', hue: HUE.completed, n: count('done') },
+    { key: 'running', label: 'in progress', hue: HUE.running, n: count('running') },
+    { key: 'review', label: 'in review', hue: REVIEW_HUE, n: count('review') },
+    { key: 'needs', label: 'need you', hue: HUE.stopped, n: count('needs') },
+    { key: 'blocked', label: 'blocked', hue: HUE.failed, n: rows.filter(isStuck).length },
+    { key: 'queued', label: 'queued', hue: DIM, n: count('queued') },
+  ]
+}
+
 export function drawPhases(b: Board): Drawing {
   const at = PHASES.indexOf(b.phase)
   // The day can close with tickets that are not done. The last step then says so: it is not a green check.
@@ -1327,14 +1344,26 @@ export function drawPhases(b: Board): Drawing {
   })
   const total = b.rows.length
   if (total === 0) return frame(svg, 104)
-  const done = b.rows.filter(r => bucket(r.state) === 'done').length
+  // One bar for all tickets, in parts: done, in progress, in review, blocked or waiting for the person, queued.
+  const parts = phaseParts(b.rows)
   const bar = W - 24
-  svg +=
-    `<rect x="12" y="106" width="${bar}" height="5" rx="2.5" fill="${EDGE}"/>` +
-    `<rect x="12" y="106" width="${Math.round((bar * done) / total)}" height="5" rx="2.5" fill="${HUE.completed}" filter="url(#glow)"/>` +
-    `<text x="12" y="126" class="s">${done} of ${total} tickets done${isClosedOpen ? ` · ${left} not done: ${b.rows.filter(r => bucket(r.state) === 'needs').length} need you` : ''}</text>`
+  let x = 12
+  svg += `<rect x="12" y="106" width="${bar}" height="5" rx="2.5" fill="${EDGE}"/>`
+  for (const part of parts) {
+    const w = Math.round((bar * part.n) / total)
+    if (w > 0) svg += `<rect x="${x}" y="106" width="${w}" height="5" rx="2.5" fill="${part.hue}"${part.key === 'done' ? ' filter="url(#glow)"' : ''}><title>${part.n} ${part.label}</title></rect>`
+    x += w
+  }
+  const done = parts.find(part => part.key === 'done')?.n ?? 0
+  svg += `<text x="12" y="126" class="s">${done} of ${total} tickets done${isClosedOpen ? ` · ${left} not done` : ''}</text>`
+  let lx = 12
+  for (const part of parts.filter(q => q.key !== 'done')) {
+    const text = `${part.n} ${part.label}`
+    svg += `<circle cx="${lx + 4}" cy="141" r="3.5" fill="${part.hue}"/><text x="${lx + 12}" y="145" class="${part.n > 0 ? 't' : 's'}">${text}</text>`
+    lx += 12 + text.length * 6.4 + 14
+  }
 
-  return frame(svg, 136)
+  return frame(svg, 156)
 }
 
 /** One ticket, opened: its session, its agents and its PR. */

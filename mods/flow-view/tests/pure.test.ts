@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, groupTickets, progress, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, phaseParts, groupTickets, progress, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -323,9 +323,22 @@ test('a closed day with open tickets does not show a green done step', () => {
   const day = { id: 'd', phase: 'done', needsYou: [], updatedAt: 1, workers: [], rows: [row('a', 'verified'), row('b', 'needs-you'), row('c', 'review')] }
   const open = drawPhases(day).source
   expect(open).toContain('closed, 2 open')
-  expect(open).toContain('1 of 3 tickets done · 2 not done: 1 need you')
+  expect(open).toContain('1 of 3 tickets done · 2 not done')
+  expect(open).toContain('1 need you')
+  expect(open).toContain('0 blocked')
+  expect(open).toContain('0 queued')
   const all = drawPhases({ ...day, rows: [row('a', 'verified'), row('d', 'merged')] }).source
   expect(all).not.toContain('closed,')
   expect(all).toContain('>done</text>')
   expect(all).toContain('2 of 2 tickets done</text>')
+})
+
+test('phaseParts counts blocked and queued tickets as their own parts', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const parts = phaseParts([row('a', 'verified'), row('b', 'needs-you'), row('c', 'blocked'), row('d', 'failed'), row('e', 'queued'), row('f', 'running'), row('g', 'draft')])
+  expect(parts.map(p => `${p.key}:${p.n}`)).toEqual(['done:1', 'running:1', 'review:1', 'needs:1', 'blocked:2', 'queued:1'])
+  const src = drawPhases({ id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [row('c', 'blocked'), row('e', 'queued'), row('a', 'merged')] }).source
+  expect(src).toContain('1 blocked')
+  expect(src).toContain('1 queued')
+  expect(src).toContain('1 of 3 tickets done')
 })
