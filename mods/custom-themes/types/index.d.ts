@@ -1,7 +1,7 @@
 export type Choice = {
-  /** The theme this session shows, by its own choice or its project's; absent, none. */
+  /** The theme this session shows, by its own choice or the one for all projects; absent, none. */
   applied?: string
-  /** Whose choice `applied` is: this session's own, or its project's. */
+  /** Whose choice `applied` is: this session's own, or the one for all projects ('project' is the stored name of that scope). */
   scope?: 'session' | 'project'
   /** A theme shown for a look only, until it is applied or the look ends. */
   preview?: string
