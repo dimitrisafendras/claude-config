@@ -17,6 +17,8 @@ const PANE = {
 
 const NOW = Date.parse('2026-11-22T12:00:00Z')
 
+const FILLED: string[] = []
+
 // Each hook here stands for the engine: nothing sits beneath the mod.
 function world(on: On) {
   const clock = mock.clock(on, { now: NOW })
@@ -31,6 +33,7 @@ function world(on: On) {
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('tool.call', () => ({ result: {} }))
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('prompt.fill', (_, e) => (FILLED.push(`${e.mode}:${e.text}`), { isFilled: true }))
 
   return clock
 }
@@ -107,6 +110,15 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   expect(plan).toContain('START WORK')
   expect(plan).toContain('BREAKDOWN')
   expect(plan).toContain('Fix the refresh call')
+
+  // An open ticket shows its steps and its quick actions with no press. A done ticket does not.
+  expect(await ui.find({ type: 'Text', text: /✓ queued\s+→\s+◉ running/ })).toBeDefined()
+  expect(await ui.find({ key: 'act-status-r05' })).toBeDefined()
+  FILLED.length = 0
+  await ui.press({ key: 'act-status-r01' })
+  await ui.press({ key: 'act-ref-r01' })
+  expect(FILLED[0]).toMatch(/^replace:Give me the status of ticket "#1 Login fails after a token refresh"/)
+  expect(FILLED[1]).toMatch(/^insert:ticket "#1 Login fails after a token refresh"/)
 
   // A count tile is a button: a press shows only its tickets.
   expect((await ui.find({ key: 'filter-needs' }))?.text).toMatch(/2\s+Needs you/)
@@ -217,6 +229,7 @@ test('a ticket row shows its PR and the mark of its CI', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'demo' })
   await clock.advance(46000)
+  await ui.press({ key: 'fold-done' })
   expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/PR #101.*✓ CI/)
   await ui.unmount()
 })
@@ -227,6 +240,7 @@ test('the demo plan goes away five minutes after the demo ends', async ($, on) =
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'demo' })
   await clock.advance(46000)
+  await ui.press({ key: 'fold-done' })
   expect(await ui.find({ key: 'ticket-r01' })).toBeDefined()
   await clock.advance(6 * 60 * 1000)
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
@@ -252,6 +266,7 @@ test('a merge and a board move in this session update the ticket without a monit
   await clock.advance(3000)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'fold-done' })
   expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+●●●●○ merged 4\/5/)
   expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+●●○○○ running 2\/5/)
   await ui.unmount()
@@ -312,9 +327,13 @@ test('a group folds, and a ticket shows its steps, its time and the part of the 
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /1 of 2 done/ })).toBeDefined()
-  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▾ ▌ DONE · 1/)
+  // The done group starts folded. A press opens it, and a second press folds it again.
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▸ ▌ DONE · 1 {3}press to show/)
+  expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   await ui.press({ key: 'fold-done' })
-  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▸ ▌ DONE · 1/)
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▾ ▌ DONE · 1 {3}press to hide/)
+  expect(await ui.find({ key: 'ticket-r01' })).toBeDefined()
+  await ui.press({ key: 'fold-done' })
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   expect(await ui.find({ key: 'ticket-r02' })).toBeDefined()
   await ui.press({ key: 'fold-all' })
