@@ -73,3 +73,18 @@ jobs:
         env:
           DISABLE_AUTOUPDATER: "1"
         run: bash tests/mods.sh
+  # The job id `check` is the required status check of `main`. Do not rename it.
+  # It is the one gate: it fails unless every job above succeeded (a skipped or cancelled job fails it).
+  check:
+    needs: [checks, mods]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All jobs succeeded
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          MODS: ${{ needs.mods.result }}
+        run: |
+          echo "checks: $CHECKS, mods: $MODS"
+          [ "$CHECKS" = success ] && [ "$MODS" = success ]
