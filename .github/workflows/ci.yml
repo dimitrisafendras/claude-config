@@ -5,17 +5,41 @@ on:
     branches: [main]
 permissions:
   contents: read
+# One run per workflow and ref. A new push cancels the old run of a pull request.
+# A push to main is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  checks:
+    name: checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
+      # Keep LF in shell files on Windows. This runs before checkout.
+      - name: Keep LF line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      # On Windows, ln -s makes a real link (or fails), not a copy. No variable is set on Linux.
+      - name: Make real symlinks
+        if: runner.os == 'Windows'
+        run: echo "MSYS=winsymlinks:nativestrict" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Shell syntax
-        run: git ls-files '*.sh' | xargs -n1 bash -n
+        run: git ls-files -z '*.sh' | xargs -0 -r -n1 bash -n
+      # shellcheck is not on the Windows image, and one OS is enough.
       - name: shellcheck
-        run: git ls-files '*.sh' | xargs shellcheck -S warning
+        if: runner.os == 'Linux'
+        run: git ls-files -z '*.sh' | xargs -0 -r shellcheck -S warning
       - name: JSON files parse
-        run: git ls-files '*.json' | xargs -n1 jq empty
+        run: git ls-files -z '*.json' | xargs -0 -r -n1 jq empty
       - name: Skill frontmatter
         run: |
           fail=0
@@ -25,18 +49,22 @@ jobs:
             grep -q '^description: ' "$f" || { echo "$f: no description"; fail=1; }
           done
           exit $fail
-      - name: install.sh --check test
-        run: bash tests/install-check.sh
-      - name: audit.sh through a link
-        run: bash tests/audit-link.sh
-      - name: list-projects.sh test
-        run: bash tests/list-projects.sh
-      - name: prefs-sync.sh test
-        run: bash tests/prefs-sync.sh
-      - name: morning.sh project filter test
-        run: bash tests/morning-project.sh
-      - name: core is generic
-        run: bash tests/core-clean.sh
+      # Every tests/*.sh runs, except mods.sh (the mods job runs it). A new test file needs no edit here.
+      - name: Shell tests
+        run: |
+          fail=0
+          for f in tests/*.sh; do
+            [ "$f" = tests/mods.sh ] && continue
+            echo "::group::$f"
+            bash "$f" || { echo "::error::$f failed"; fail=1; }
+            echo "::endgroup::"
+          done
+          exit $fail
+  mods:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       # `claude plugin validate` and `claude plugin test` need no sign-in and no API key.
       # The version is pinned: --strict type-checks the mods against the types of this build.
       - name: Install the Claude Code CLI
@@ -45,3 +73,18 @@ jobs:
         env:
           DISABLE_AUTOUPDATER: "1"
         run: bash tests/mods.sh
+  # The job id `check` is the required status check of `main`. Do not rename it.
+  # It is the one gate: it fails unless every job above succeeded (a skipped or cancelled job fails it).
+  check:
+    needs: [checks, mods]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All jobs succeeded
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          MODS: ${{ needs.mods.result }}
+        run: |
+          echo "checks: $CHECKS, mods: $MODS"
+          [ "$CHECKS" = success ] && [ "$MODS" = success ]
