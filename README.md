@@ -45,6 +45,7 @@ The setup runs four flows as loops with no person in them. Details: `docs/flows.
 | Start the day | `claude/skills/start-work` | `/start-work`: housekeeping of every project in `~/Projects`, inbox (PRs, plus extra sources from the profile), one plan, then starts the work for tickets that are not blocked and not needs-you, Work Monitor |
 | Watch and ship | `claude/skills/monitor`, `deploy`, `pr-sweep` | `/monitor`: sessions, PRs with CI, deploys. `/deploy`: wait for staging, test, report how far it got; starts by itself after a merge. `/pr-sweep`: fix comments, conflicts, red CI |
 | Merge | `claude/skills/merge-when-green` | `/merge-when-green`: merge one PR when CI is green (the merge stage of the lane loop); waits with ci-watch, stops on red CI, a conflict, a draft or requested changes |
+| Land | `claude/skills/land` | `/land [PR numbers]`: merge one or more PRs when CI is green, then pull the main checkout and install. Any PR, no fixed number; waits with ci-watch, never polls |
 | Ship | `claude/skills/ship-mod` | `/ship-mod`: commit, push, PR, hand the wait to ci-watch (it merges on green), then pull main and install the mods |
 | Browser | `claude/skills/start-browser`, `test-in-chrome` | `/start-browser`: check the Chrome bridge, open one tab for this session. `/test-in-chrome`: run a test plan in the real Chrome and report pass or fail per step with evidence |
 | Clean | `claude/skills/cleanup` | Remove dead worktrees, archive finished sessions; runs right after a merge for that lane, and nightly |
