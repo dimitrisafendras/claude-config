@@ -75,7 +75,12 @@ if [ "$MODE" = mods ]; then
       claude plugin install "$m@$pm" || claude plugin enable "$m@$pm" || true
     done
   fi
-  echo "Done. Restart Claude Code. merge-policy gives no permission until ~/.claude/merge-policy.json exists."
+  if [ -f "$D/merge-policy.json" ]; then
+    n=$(jq '.repos | length' "$D/merge-policy.json" 2>/dev/null || echo "?")
+    echo "Done. Restart Claude Code. merge-policy: $n repos in ~/.claude/merge-policy.json."
+  else
+    echo "Done. Restart Claude Code. merge-policy gives no permission until ~/.claude/merge-policy.json exists."
+  fi
   exit 0
 fi
 
