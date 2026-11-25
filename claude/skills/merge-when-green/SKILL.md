@@ -10,6 +10,10 @@ argument-hint: "[PR number or URL] (default: the pull request of the current bra
 
 Merge one pull request, and only when it is ready. Read the state once. Never poll.
 
+## In a loop
+
+The lane loop runs this skill at its merge stage, with no person. Check `bash ~/.claude/scripts/autonomy.sh check` first. In a company repo, merging on green under `merge-policy` needs no approval. Anything that stops the merge (red CI, a conflict, a refused rule) goes back to the lane: fix it within the limit of 3 automatic tries for each PR, then `needs-you` with a decision record. Never retry a refused merge.
+
 ## Steps
 
 1. **Find the PR.** With an argument, use it. Else run `gh pr view --json number,url,headRefName` in the current repo. No PR: stop and say so. Name the step that opens one: `/ship`.
