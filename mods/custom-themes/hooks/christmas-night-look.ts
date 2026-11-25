@@ -35,12 +35,12 @@ const CARD = { backgroundColor: '#1d2560', radius: 14, padding: 14, shadow: 'non
 
 /**
  * The whole look: the colors, the scene behind the conversation, an indigo frosted glass on the panels of the app
- * (the same strength as the official dark themes), and matte indigo cards under the messages and tool rows.
+ * (a light blur, so the scene stays in view behind the conversation), and matte indigo cards under the messages and tool rows.
  */
 export const LOOK: ThemeSetArgs = {
   colors: made.theme,
   overrideColorScheme: 'dark',
-  backdrop: { scene: SCENE, glass: { blur: 14, tint: '#11153c', opacity: 0.45 } },
+  backdrop: { scene: SCENE, glass: { blur: 6, tint: '#11153c', opacity: 0.34 } },
   style: {
     UserMessage: { ...CARD, backgroundColor: '#2a3478', borderColor: '#e2b44a66', borderWidth: 1 },
     AssistantMessage: CARD,

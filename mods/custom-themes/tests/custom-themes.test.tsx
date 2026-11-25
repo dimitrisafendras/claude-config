@@ -9,7 +9,7 @@ const CARD = { plugin: 'custom-themes', component: 'Placed', requestId: 'themes-
 const XMAS = THEMES[0]!
 const PIXEL = THEMES[1]!
 const backdrop = (id: string) =>
-  ({ plugin: 'custom-themes', component: 'Backdrop', requestId: 'backdrop', props: { scene: id, plugin: 'custom-themes', glass: { blur: 14, tint: '#11153c', opacity: 0.45 } } }) as const
+  ({ plugin: 'custom-themes', component: 'Backdrop', requestId: 'backdrop', props: { scene: id, plugin: 'custom-themes', glass: { blur: 6, tint: '#11153c', opacity: 0.34 } } }) as const
 
 const SETS: ThemeSetArgs[] = []
 let clears = 0
