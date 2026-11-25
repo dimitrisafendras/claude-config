@@ -231,3 +231,26 @@ test('the demo plan goes away five minutes after the demo ends', async ($, on) =
   expect(await ui.find({ type: 'Text', text: /No plan yet/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a merge and a board move in this session update the ticket without a monitor write', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.tool.call({
+    tool: 'ArtifactData',
+    action: 'batch',
+    url: 'https://claude.ai/artifact/x',
+    writes: [
+      { op: 'set', collection: 'days', doc_id: '2026-11-22', data: { phase: 'running' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r01', data: { n: 1, title: 'Fix the cart total', state: 'review', prNumber: 7 } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r02', data: { n: 2, title: 'Add the invoice page', url: 'https://app.example.com/t/abc123', state: 'queued' } },
+    ],
+  } as never)
+  await $.tool.call({ tool: 'Bash', command: 'gh pr merge 7 --squash' } as never)
+  await $.tool.call({ tool: 'mcp__board__clickup_update_task', task_id: 'abc123', status: 'in progress' } as never)
+  await clock.advance(3000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'ticket-r01' }))?.text).toMatch(/Fix the cart total\s+merged/)
+  expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/Add the invoice page\s+running/)
+  await ui.unmount()
+})
