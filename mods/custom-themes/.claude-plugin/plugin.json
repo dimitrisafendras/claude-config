@@ -1,6 +1,6 @@
 {
   "name": "custom-themes",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The custom themes of this setup on one card: /themes picks Christmas Night (snowy trees with lights, a snow ground that follows the context window) Pixel Blue (a pixel night sky with Orion, more stars as the context fills), or Pokémon Pixel (a sunny pixel route with a battle box: the context is the HP bar). Apply for all projects or this session, preview for 20 seconds, or no theme. Two terminal themes for /theme.",
   "author": {
     "name": "claude-config"
