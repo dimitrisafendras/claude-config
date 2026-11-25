@@ -1980,7 +1980,7 @@ export const register: Register = on => {
               )
             })}
             {report.once.length > 0 && (
-              <Button key="once" plain onPress={toggleOnce}>
+              <Button key="once" variant="secondary" onPress={toggleOnce}>
                 <Text bold color={DIM}>
                   {showOnce ? '▾' : '▸'} ○ Once
                 </Text>{' '}
@@ -2008,7 +2008,7 @@ export const register: Register = on => {
               </Text>
             )}
             {(day.needsYou.length > 0 || day.headline !== undefined) && (
-              <Button key="notes" plain onPress={toggleNotes}>
+              <Button key="notes" variant="secondary" onPress={toggleNotes}>
                 <Text bold color={day.needsYou.length > 0 ? 'warning' : 'inactive'}>
                   {showNotes ? '▾' : '▸'} {day.needsYou.length > 0 ? `! ${plural(day.needsYou.length, 'note')} for you` : 'Summary of the day'}
                 </Text>
@@ -2031,7 +2031,8 @@ export const register: Register = on => {
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column">
-                <Button key={`fold-${g.group}`} plain onPress={fold(g.group)}>
+                {/* A real button, not plain text: the whole pill is the click area. */}
+                <Button key={`fold-${g.group}`} variant="secondary" onPress={fold(g.group)}>
                   <Text bold color={g.hue}>
                     {closed.includes(g.group) ? '▸' : '▾'} {g.mark} {g.label}
                   </Text>{' '}
@@ -2110,7 +2111,7 @@ export const register: Register = on => {
         )}
 
         {v.tab === 'sessions' && everyone.length > 1 && (
-          <Button key="only-live" plain dimColor onPress={() => update($, view, w => ({ ...w, live: !w.live, session: '' }))}>
+          <Button key="only-live" variant="secondary" onPress={() => update($, view, w => ({ ...w, live: !w.live, session: '' }))}>
             {v.live === true ? `Showing ${live} running of ${everyone.length}. Show all sessions` : `Only running (${live})`}
           </Button>
         )}
