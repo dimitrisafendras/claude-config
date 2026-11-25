@@ -1893,10 +1893,10 @@ export const register: Register = on => {
         {!(v.tab === 'tickets' && day.id !== '' && 'Svg' in t) && (
         <Box key="overview" flexDirection="row" gap={2} flexWrap="wrap">
           {'Svg' in t && sorted.length > 0 && (
-            <t.Svg source={drawOverview(sorted).source} width={180} alt={`${count('done')} of ${sorted.length} tickets done.`} />
+            <t.Svg source={drawOverview(sorted).source} width={150} alt={`${count('done')} of ${sorted.length} tickets done.`} />
           )}
           {time !== undefined && (
-            <Box flexDirection="column" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
+            <Box flexDirection="column" alignSelf="flex-start" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
               <Text bold>⏱ Time of this session</Text>
               <Text>{timeLines(time)[0]}</Text>
               <Text color={time.share >= 25 ? 'warning' : 'success'}>{timeLines(time)[1]}</Text>
