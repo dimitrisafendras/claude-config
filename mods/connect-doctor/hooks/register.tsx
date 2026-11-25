@@ -39,9 +39,15 @@ function addName(found: Map<string, Candidate>, name: string, isLive: boolean): 
   found.set(key, { name: nicer, isLive: isLive || (had?.isLive ?? false) })
 }
 
+/** The user's home folder: HOME, else USERPROFILE (Windows apps have no HOME), with `\` as `/`. */
+async function homeDir($: $T): Promise<string> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
+  return home.replace(/\\/g, '/')
+}
+
 async function configNames($: $T, cwd: string): Promise<string[]> {
   const names: string[] = []
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = await homeDir($)
   try {
     // Only the keys are read: values can hold tokens and stay untouched.
     const data = JSON.parse(String(await $.fs.read(`${home}/.claude.json`))) as {

@@ -13,15 +13,16 @@ const SKILLS: Record<string, string> = {
 
 type World = { label: { value: string | undefined; calls: number; labels: string[][] }; prompts: (readonly string[] | undefined)[] }
 
-function world(on: On): World {
+function world(on: On, env: Record<string, string> = { HOME: '/home/me' }): World {
   const w: World = { label: { value: 'none', calls: 0, labels: [] }, prompts: [] }
   mock.store(on)
-  mock.env(on, { HOME: '/home/me' })
+  mock.env(on, env)
   mock.clock(on, { now: 1000 })
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('fs.list', (_, e) => {
-    if (e.path === '/home/me/.claude/skills') {
+    // The engine makes the path native, so check only its end: /home/me or C:/Users/me.
+    if (/\/me\/\.claude\/skills$/.test(e.path.replace(/\\/g, '/'))) {
       return { value: Object.keys(SKILLS).map(name => ({ name, kind: 'other' as const, size: 0, mtimeMs: 0, isLink: true })) }
     }
     throw new Error('ENOENT')
@@ -131,4 +132,11 @@ test('reload rebuilds the index', async ($, on) => {
   world(on)
   await start($)
   expect(await cmd($, 'reload')).toContain('3 skills')
+})
+
+test('with no HOME (Windows) the skills come from USERPROFILE', async ($, on) => {
+  const w = world(on, { USERPROFILE: 'C:/Users/me' })
+  await start($)
+  await send($, 'ok so start my day please')
+  expect(w.prompts.at(-1)?.[0]).toContain('the skill "start-work"')
 })
