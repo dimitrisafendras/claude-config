@@ -126,3 +126,23 @@ test('off stops the hints', async ($, on) => {
   expect((await call($)).context).toBeUndefined()
   expect(await status($)).toContain('off')
 })
+
+test('a sign-in page on a local development host gives no stop hint', async ($, on) => {
+  const reply = { value: { text: '' } }
+  const w = world(on, reply)
+  await start($)
+  for (const url of ['http://localhost:36020/ui/v2/login/loginname', 'http://127.0.0.1:3000/login', 'http://auth.localhost/ui/v2/login']) {
+    reply.value = { text: `Navigated to ${url}\nSign in\nPassword` }
+    const ran = await call($, 'mcp__Claude_Browser__navigate')
+    expect(ran.context).toBeUndefined()
+  }
+  expect(w.notes).toHaveLength(0)
+})
+
+test('a sign-in page on a host that only contains the word localhost still stops', async ($, on) => {
+  const w = world(on, { value: { text: 'Navigated to https://localhost.example.com/login' } })
+  await start($)
+  const ran = await call($, 'mcp__Claude_Browser__navigate')
+  expect(ran.context?.[0]).toContain('This is a sign-in page. Stop.')
+  expect(w.notes).toHaveLength(1)
+})
