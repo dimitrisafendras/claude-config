@@ -13,6 +13,7 @@ A Claude Code setup in two layers, two repos:
 ```
 
 - `install.sh` records the profile (a name under `profiles/`, or a path) in `~/.claude/claude-config.profile`. Later runs, `/start-work`, `/setup-audit` and `prefs-sync` read that file, so the profile can live in any repo.
+- `install.sh` also records the path of the main checkout in `~/.claude/claude-config.repo`. `/start-work` and `/setup-audit` find the repo there, so the repo can be in any folder.
 - The profile's mods come from its own `.claude-plugin/marketplace.json`; `./install.sh --mods` installs the core's and the profile's.
 - A profile with a `sync.sh` can copy skills from a source repo of yours; the audit runs `sync.sh --check`.
 - Nothing in the core points at a private repo. The link is only the recorded profile path on each computer.
@@ -36,7 +37,7 @@ A Claude Code setup in two layers, two repos:
 | Cheat sheet | `mods/cheatsheet` | `/cheat` and a button row above the prompt |
 | Routines | `routines/` | Prompts for scheduled tasks: nightly-cleanup, morning-prep, weekly-setup-audit, weekly-claude-releases, prefs-sync, project-daily |
 | Claude releases | `docs/claude-releases.md`, `docs/claude-releases-improvements.md`, `docs/claude-releases-proposals.md`, `routines/weekly-claude-releases.md` | A digest page with three tabs: **Releases** (the big Claude features and workflow changes, by month, newest first), **Improvements** (the updates that were merged to this setup) and **Proposals** (changes that the releases suggest, with the gain and the risk). The weekly routine updates all three, republishes the artifact (URL in `docs/claude-releases-url`) and opens one PR |
-| CI | `.github/workflows/ci.yml`, `tests/` | Two jobs run in parallel. `checks` runs on Linux and on Windows: shell syntax, JSON, skill frontmatter, and every `tests/*.sh` except `mods.sh` (shellcheck runs on Linux only). A new test file runs with no change to the workflow. The tests are `install-check`, `audit-link`, `list-projects`, `prefs-sync`, `morning-project`, `core-clean`, `mem-budget`, `merge-when-green` and `inventory`. `inventory` fails when a skill, mod, routine, script or test file is not named here. `mods` runs on Linux: it runs `tests/mods.sh`. A third job, `check`, is the one gate that `main` requires: it fails unless `checks` and `mods` both succeed. A new push cancels the old run of a pull request |
+| CI | `.github/workflows/ci.yml`, `tests/` | Three jobs run: `checks` and `mods` in parallel, then the gate `check`. `checks` runs on Linux and on Windows: shell syntax, JSON, skill frontmatter, and every `tests/*.sh` except `mods.sh` (shellcheck runs on Linux only). A new test file runs with no change to the workflow. The tests are `install-check`, `audit-link`, `list-projects`, `prefs-sync`, `morning-project`, `core-clean`, `mem-budget`, `merge-when-green` and `inventory`. `inventory` fails when a skill, mod, routine, script or test file is not named here. `mods` runs on Linux: it runs `tests/mods.sh`. `check` is the one gate that `main` requires: it fails unless `checks` and `mods` both succeed. A new push cancels the old run of a pull request |
 | Agents | `claude/agents/pr-reviewer.md` | The one custom subagent |
 
 ## The flow of a change
@@ -51,7 +52,7 @@ A Claude Code setup in two layers, two repos:
 
 ## New computer
 
-1. Clone this repo to `~/Projects/claude-config`. Clone your profile repo next to it, for example `~/Projects/my-profile`.
+1. Clone this repo to `~/Projects/claude-config`. Clone your profile repo next to it, for example `~/Projects/my-profile`. Another folder also works, because `install.sh` records the path.
 2. Run `./install.sh --profile ~/Projects/my-profile` from the main checkout (it stops in a worktree). With no profile, run `./install.sh`. The profile is recorded in `~/.claude/claude-config.profile`, so later runs reuse it. `--no-profile` goes back to the core only.
 3. Restart Claude Code, then run `./install.sh --check`.
 4. Sign in to the MCP servers that you need with `/mcp`.
@@ -121,11 +122,12 @@ automodel and memory-governor have no fixed hook sequence on `agent.spawn`.
 4. It links these files from the repo into `~/.claude`: `CLAUDE.md`, the ASD-STE100 output style,
    every skill folder in `claude/skills/` and in the profile, `profile.md`, the profile's `start-work.d` files, the agent `pr-reviewer` and the scripts in `claude/scripts/`.
    A real file at a target goes to `~/.claude/backups/install-<date>/` first.
+5. It writes the path of the main checkout to `~/.claude/claude-config.repo`.
 
 Because of the links, a change in this repo applies at once, and the links serve the branch of the main checkout. Keep it on `main`.
 
 `./install.sh --check` changes nothing. It lists each setting, permission, plugin and link where `~/.claude`
-is different from the repo, and a checkout that is not on `main`. Exit 1 means drift. `/start-work` runs it each morning.
+is different from the repo, a checkout that is not on `main`, and a missing or wrong `~/.claude/claude-config.repo`. Exit 1 means drift. `/start-work` runs it each morning.
 
 ## Answer format: ASD-STE100
 

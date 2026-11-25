@@ -36,7 +36,9 @@ if ln -s "$S" "$T/linkhome/prefs-sync.sh" 2>/dev/null && [ -L "$T/linkhome/prefs
   bash "$T/linkhome/prefs-sync.sh" --check >/dev/null 2>&1; chk "check through a link finds the repo" "$?" "1"
 else
   case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) echo "skipped: no symbolic links here (check through a link)";;
+    MINGW*|MSYS*|CYGWIN*)
+      if [ -n "${CI:-}" ]; then echo "FAIL: no symbolic links here, and CI is set"; fail=1
+      else echo "skipped: no symbolic links here (check through a link)"; fi;;
     *) echo "FAIL: cannot make a symbolic link in $T"; fail=1;;
   esac
 fi
