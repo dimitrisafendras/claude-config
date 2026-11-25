@@ -1304,21 +1304,26 @@ export function bucket(state: string): View['filter'] {
 /** Today: the phases of the day as a pipeline. */
 export function drawPhases(b: Board): Drawing {
   const at = PHASES.indexOf(b.phase)
+  // The day can close with tickets that are not done. The last step then says so: it is not a green check.
+  const left = b.rows.filter(r => bucket(r.state) !== 'done').length
+  const isClosedOpen = b.phase === 'done' && left > 0
   let svg = heading(24, 'START WORK', at < 0 && b.phase ? `${b.id} · ${b.phase}` : b.id)
   const y = 62
   PHASES.forEach((name, i) => {
     const x = 46 + i * 92
-    const state = at < 0 ? 'idle' : i < at || b.phase === 'done' ? 'completed' : i === at ? 'running' : 'idle'
+    const isLast = i === PHASES.length - 1
+    const state = at < 0 ? 'idle' : isLast && isClosedOpen ? 'stopped' : i < at || b.phase === 'done' ? 'completed' : i === at ? 'running' : 'idle'
+    const shown = isLast && isClosedOpen ? `closed, ${left} open` : name
     if (i > 0) {
       const lit = i <= at ? HUE.completed : EDGE
       svg += `<line x1="${x - 78}" y1="${y}" x2="${x - 14}" y2="${y}" stroke="${lit}" stroke-width="2" stroke-linecap="round"${i === at && b.phase !== 'done' ? ' stroke-dasharray="5 5"><animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.8s" repeatCount="indefinite"/></line>' : '/>'}`
     }
     svg +=
-      `<g><title>${esc(name)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : 'waits'}</title>` +
+      `<g><title>${esc(shown)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : state === 'stopped' ? 'the day is closed, and some tickets are not done' : 'waits'}</title>` +
       `<g filter="url(#shadow)"><circle cx="${x}" cy="${y}" r="13" fill="${CARD}"/></g>` +
       `<circle cx="${x}" cy="${y}" r="13" fill="none" stroke="${HUE[state]}" stroke-width="1.6"${state === 'idle' ? '' : ' filter="url(#glow)"'}/>` +
       icon(state, x, y) +
-      `<text x="${x}" y="${y + 29}" class="${i === at ? 'b' : state === 'completed' ? 't' : 's'}" text-anchor="middle">${name}</text></g>`
+      `<text x="${x}" y="${y + 29}" class="${i === at ? 'b' : state === 'completed' ? 't' : 's'}" text-anchor="middle">${esc(shown)}</text></g>`
   })
   const total = b.rows.length
   if (total === 0) return frame(svg, 104)
@@ -1327,7 +1332,7 @@ export function drawPhases(b: Board): Drawing {
   svg +=
     `<rect x="12" y="106" width="${bar}" height="5" rx="2.5" fill="${EDGE}"/>` +
     `<rect x="12" y="106" width="${Math.round((bar * done) / total)}" height="5" rx="2.5" fill="${HUE.completed}" filter="url(#glow)"/>` +
-    `<text x="12" y="126" class="s">${done} of ${total} tickets done</text>`
+    `<text x="12" y="126" class="s">${done} of ${total} tickets done${isClosedOpen ? ` · ${left} not done: ${b.rows.filter(r => bucket(r.state) === 'needs').length} need you` : ''}</text>`
 
   return frame(svg, 136)
 }

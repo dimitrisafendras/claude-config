@@ -317,3 +317,15 @@ test('ticketTime gives the time of the ticket and the part of the person', () =>
   expect(ticketTime({ id: 'r', title: 'T', state: 'merged', startedAt: 0, endedAt: 3_600_000, mineMs: 360_000 }, 9_999_999)).toBe('1h 00m · you about 6m 00s (10%)')
   expect(ticketTime({ id: 'r', title: 'T', state: 'running', startedAt: 0 }, 600_000)).toBe('10m 00s so far · you about 0ms (0%)')
 })
+
+test('a closed day with open tickets does not show a green done step', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const day = { id: 'd', phase: 'done', needsYou: [], updatedAt: 1, workers: [], rows: [row('a', 'verified'), row('b', 'needs-you'), row('c', 'review')] }
+  const open = drawPhases(day).source
+  expect(open).toContain('closed, 2 open')
+  expect(open).toContain('1 of 3 tickets done · 2 not done: 1 need you')
+  const all = drawPhases({ ...day, rows: [row('a', 'verified'), row('d', 'merged')] }).source
+  expect(all).not.toContain('closed,')
+  expect(all).toContain('>done</text>')
+  expect(all).toContain('2 of 2 tickets done</text>')
+})
