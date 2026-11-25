@@ -16,6 +16,10 @@ import type { EngineInterface, PromptOrigin, Register } from 'claude-code'
 //   free=41% total=24576MB heavy_procs=2 room_for_heavy_jobs=0 (floor 30%, ~3500MB/job)
 // and exits 0 when there is room for another heavy job, 1 when not.
 // MEM_FLOOR_PCT and MEM_JOB_MB in the environment tune it.
+//
+// On the way below the floor it also runs ~/.claude/mem-free.sh --apply --apps
+// once: that script stops the idle Docker Compose projects and quits the apps
+// that the person listed in ~/.claude/mem-free.apps. /memgov free runs it by hand.
 
 type Reading = {
   at: number
@@ -166,6 +170,19 @@ async function heavyList($: EngineInterface): Promise<string> {
   }
 }
 
+/** Runs mem-free.sh and gives its result line, or undefined when the script is missing or fails. */
+async function freeMemory($: EngineInterface): Promise<string | undefined> {
+  try {
+    const home = await homeOf($)
+    if (!home) return undefined
+    const ran = await $.process.run(['bash', `${home}/.claude/mem-free.sh`, '--apply', '--apps'], { timeoutMs: 120_000 })
+    const line = ran.stdout.trim().split('\n').pop() ?? ''
+    return ran.exitCode === 0 && line.startsWith('mem-free:') ? line : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function measure($: EngineInterface): Promise<Reading | undefined> {
   try {
     if (scriptPath === undefined) {
@@ -188,7 +205,8 @@ async function measure($: EngineInterface): Promise<Reading | undefined> {
       if (!isBelowFloor) {
         isBelowFloor = true
         const procs = await heavyList($)
-        const text = `Free memory ${r.freePct}% is below the ${r.floorPct}% floor (${r.heavyProcs} heavy jobs). ${procs ? `Top: ${procs}.` : ''}`
+        const freed = await freeMemory($)
+        const text = `Free memory ${r.freePct}% is below the ${r.floorPct}% floor (${r.heavyProcs} heavy jobs). ${procs ? `Top: ${procs}.` : ''}${freed ? ` ${freed}.` : ''}`
         void $.ui.notify(text, { title: 'memory-governor' }).catch(() => {})
       }
     } else {
@@ -282,8 +300,8 @@ export const register: Register = on => {
       denies = Number((await $.store.get('denies')) ?? 0) || 0
       await $.command.register({
         name: 'memgov',
-        description: 'Memory governor: on, off, status',
-        argumentHint: 'on | off | status',
+        description: 'Memory governor: on, off, status, free',
+        argumentHint: 'on | off | status | free',
         immediate: true,
       })
       timer?.cancel()
@@ -372,6 +390,11 @@ export const register: Register = on => {
         await $.store.set('enabled', false)
         show($)
         return { text: 'memory-governor is off. Agents and heavy jobs are not checked.' }
+      }
+      if (sub === 'free') {
+        const freed = await freeMemory($)
+        const after = await measure($)
+        return { text: `${freed ?? 'mem-free.sh is missing or failed (~/.claude/mem-free.sh).'}${after ? `\nNow: free ${after.freePct}%, room ${after.room}.` : ''}` }
       }
       const r = await current($)
       const now = await $.clock.now()

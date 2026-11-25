@@ -16,7 +16,9 @@ function engine(on: On, budget: { line: string; exitCode: number }, env: Record<
     const value: ProcessRunResult =
       e.argv[0] === 'ps'
         ? { exitCode: 0, stdout: ' 900000 /usr/bin/node\n 400000 vitest\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
-        : { exitCode: budget.exitCode, stdout: budget.line + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+        : e.argv[1]?.endsWith('mem-free.sh')
+          ? { exitCode: 0, stdout: 'Docker: not running.\nmem-free: stopped 1 docker project(s), quit 0 app(s)\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+          : { exitCode: budget.exitCode, stdout: budget.line + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
     return { value }
   })
   on('ui.status', (_, e) => {
@@ -88,13 +90,15 @@ test('no room: heavy Bash jobs are refused, light ones and scoped tests run', as
 })
 
 test('below the floor it notifies once, not every minute', async ($, on) => {
-  const { notes, clock } = engine(on, { ...FULL })
+  const { notes, runs, clock } = engine(on, { ...FULL })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
   await clock.advance(60_000)
   await clock.advance(60_000)
   expect(notes.length).toBe(1)
   expect(notes[0]).toMatch(/22% is below the 30% floor.*node/)
+  expect(notes[0]).toMatch(/mem-free: stopped 1 docker project/)
+  expect(runs.filter(a => a[1]?.endsWith('mem-free.sh')).length).toBe(1)
 })
 
 test('a new reading changes the decision, and /memgov off lets all through', async ($, on) => {
