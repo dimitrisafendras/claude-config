@@ -69,8 +69,8 @@ Each file in `~/.claude/start-work.d/` is one source (a ticket board, an error t
 ## Make your own profile
 
 1. Make a private repo, for example `my-profile`, and copy `profiles/example/` into its root. Remove what is not yours. Its README says what goes in a profile and what stays in the core.
-2. Keep the same layout: `profile.md` (rules for `CLAUDE.md`), `settings.json` (extra permissions and plugins), `projects.conf`, `skills/`, `start-work.d/` (extra sources), `mods/` with its own `.claude-plugin/marketplace.json` (give it a name of its own), optional `sync.sh` and `docs/`.
-3. `./install.sh --profile ~/Projects/my-profile`. Files you edit later (`projects.conf`, `work-monitor-url`, `cheat-sheet-url`, `cheat-buttons.json`) are copied once and never overwritten.
+2. Keep the same layout: `profile.md` (rules for `CLAUDE.md`), `settings.json` (extra permissions and plugins), `projects.conf`, `merge-policy.json` (optional: the merge rules of the `merge-policy` mod), `skills/`, `start-work.d/` (extra sources), `mods/` with its own `.claude-plugin/marketplace.json` (give it a name of its own), optional `sync.sh` and `docs/`.
+3. `./install.sh --profile ~/Projects/my-profile`. Files you edit later (`projects.conf`, `work-monitor-url`, `cheat-sheet-url`, `cheat-buttons.json`, `merge-policy.json`) are copied once and never overwritten.
 4. `--no-profile` returns to the core and removes the profile's links.
 5. A profile inside this repo also works (`profiles/<yours>/`, installed by name), for a private fork.
 
@@ -103,6 +103,8 @@ A plain `./install.sh` does not install them. `./install.sh --mods` does. Each m
 | cheatsheet | `/cheat` lists your skills from the live skill files, with the cheat sheet link. A row of buttons above the prompt fills (or, with `"send": true`, runs) your main commands. An optional `"hint"` shows under a button while the pointer is over it. Edit `~/.claude/cheat-buttons.json` (example in the mod folder) | `/cheat [word\|show\|hide\|reload]` |
 | flow-view | A dashboard pane for the work day. **Today**: the phases of the `/start-work` plan (read from its Work Monitor writes), five counts (running, in review, done, needs you, queued) that filter the ticket list, and the tickets as rows, sorted by need, with the PR and the CI mark; a press on a row opens its breakdown into session, agents and PR. **Sessions**: a row for each session that runs the mod, running ones first, with a toggle for only those that run; a press opens its steps with durations and its run graph of agents and subagents. A subsession is not linked to its parent | `/flow [tickets\|sessions\|status\|clear\|demo\|help]` |
 | custom-themes | The custom themes of this setup on one card, like the `theme-examples` plugin: **Christmas Night** (a snowy village under a moon and a faint aurora, with a decorated tree, pines, an A-frame cabin, small houses, a robin on a sign that shows the context fill, and snow on the ground, the trees and the roofs that rises as the context window fills and falls after `/compact` or `/clear`; frosted glass and cards under the messages keep the text easy to read) **Pixel Blue** (a pixel night sky with Orion, more stars as the context fills; blue colors for dark and light mode; two terminal themes for `/theme`) and **Pokémon Pixel** (a sunny pixel route of a handheld monster game, in original art: a battle box shows the context as HP, and wild creatures come out of the tall grass as it fills). A theme applies to all projects (saved) or to this session; a preview lasts 20 seconds | `/themes [<name> [session]\|list\|off\|preview <name>]` |
+
+The `merge-policy` file gives permission to merge with no prompt, so only its owner writes it. The core ships no real policy. To make it, copy the example and edit it. On macOS and Linux (and in Git Bash): `cp mods/merge-policy/merge-policy.example.json ~/.claude/merge-policy.json`. On Windows in PowerShell: `Copy-Item mods\merge-policy\merge-policy.example.json "$env:USERPROFILE\.claude\merge-policy.json"`. Or put `merge-policy.json` in your profile: `install.sh` copies it once, and never overwrites it.
 
 Known limits: ci-watch refuses `merge-when-green.sh` (use `/ci-watch auto-merge`, or `/ci-watch allow-poll on`). `ship` runs git with repo hooks off.
 automodel and memory-governor have no fixed hook sequence on `agent.spawn`.
@@ -143,5 +145,5 @@ The caveman plugin and its marketplace are not in the settings, because caveman 
 | `claude/agents/` | `pr-reviewer`, the one user-level subagent |
 | `claude/scripts/` | statusline-command.sh, merge-when-green.sh (`-R owner/repo`, `-m method`), mem-budget.sh, list-projects.sh |
 | `claude/settings.json` | Settings that `install.sh` merges into `~/.claude/settings.json` |
-| `profiles/example/` | The layout of a profile: `profile.md`, `settings.json`, `projects.conf`, `skills/`, `start-work.d/`, `mods/`, optional `sync.sh` and `docs/`. Your real profile is a private repo with this layout |
+| `profiles/example/` | The layout of a profile: `profile.md`, `settings.json`, `projects.conf`, `merge-policy.json`, `skills/`, `start-work.d/`, `mods/`, optional `sync.sh` and `docs/`. Your real profile is a private repo with this layout |
 

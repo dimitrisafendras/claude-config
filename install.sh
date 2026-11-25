@@ -183,8 +183,12 @@ link() {  # link <source> <target>; a real file or folder at <target> is moved i
 }
 while IFS=$'\t' read -r src dst; do link "$src" "$dst"; done < <(links)
 if [ -n "$PR" ]; then
-  for f in projects.conf work-monitor-url cheat-sheet-url cheat-buttons.json; do  # copied, not linked: yours to edit; never overwritten
-    if [ -f "$PR/$f" ] && [ ! -e "$D/$f" ]; then cp "$PR/$f" "$D/$f"; echo "copied $f (yours to edit)"; fi
+  for f in projects.conf work-monitor-url cheat-sheet-url cheat-buttons.json merge-policy.json; do  # copied, not linked: yours to edit; never overwritten
+    if [ -f "$PR/$f" ] && [ ! -e "$D/$f" ]; then
+      cp "$PR/$f" "$D/$f"
+      if [ "$f" = merge-policy.json ]; then echo "copied $f (it permits gh pr merge with no prompt for the repos in it; yours to edit)"
+      else echo "copied $f (yours to edit)"; fi
+    fi
   done
   echo "$PROFILE" > "$RECORD"
 elif [ -f "$RECORD" ] || [ "$PROFILE" = "" ]; then

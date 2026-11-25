@@ -18,7 +18,7 @@ if ! { ln -s "$ROOT/install.sh" "$T/link-probe" 2>/dev/null && [ -L "$T/link-pro
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
       if [ -n "${CI:-}" ]; then echo "FAIL: no symbolic links here, and CI is set"; fail=1
-      else echo "skipped: no symbolic links here (tests 6 and 9)"; fi;;
+      else echo "skipped: no symbolic links here (tests 6, 9 and 10)"; fi;;
     *) echo "FAIL: cannot make a symbolic link in $T"; fail=1;;
   esac
 fi
@@ -107,6 +107,36 @@ if [ -n "$LINKS" ]; then
   [ "$got" = "$R" ] || { echo "FAIL: install recorded the repo '$got', want '$R'"; fail=1; }
   out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --check 2>&1); rc=$?
   [ "$rc" = 0 ] || { echo "FAIL: check after install gave exit $rc, want 0:"; echo "$out" | head -10; fail=1; }
+fi
+
+# 10. merge-policy.json of a profile: copied once, never overwritten, and not made when the profile has none.
+# It permits merges with no prompt, so an install must never change a file that is already there.
+if [ -n "$LINKS" ]; then
+  R="$T/repo10"; H="$T/home10"; mkdir -p "$R" "$H/.claude" "$T/bin"
+  cp -R "$ROOT/install.sh" "$ROOT/claude" "$R/"
+  git -C "$R" init -q -b main
+  R="$(cd "$R" && pwd)"
+  printf '#!/bin/sh\nexit 0\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
+  P10="$T/profile10"; cp -R "$ROOT/profiles/example" "$P10"
+  printf '{\n  "repos": {},\n  "requireGreen": true,\n  "allowAdmin": false\n}\n' > "$P10/merge-policy.json"
+  # (a) the first install copies the file, with the same content, and says what it does.
+  out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --profile "$P10" 2>&1); rc=$?
+  [ "$rc" = 0 ] || { echo "FAIL: profile install gave exit $rc"; echo "$out" | tail -5; fail=1; }
+  expect "copied merge-policy.json (it permits gh pr merge with no prompt"
+  if [ -f "$H/.claude/merge-policy.json" ] && cmp -s "$P10/merge-policy.json" "$H/.claude/merge-policy.json"; then :
+  else echo "FAIL: merge-policy.json was not copied with the same content"; fail=1; fi
+  # (b) a second install does not overwrite a changed file.
+  printf '{"repos":{},"requireGreen":false,"allowAdmin":false}\n' > "$H/.claude/merge-policy.json"
+  cp "$H/.claude/merge-policy.json" "$T/policy10.changed"
+  out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --profile "$P10" 2>&1); rc=$?
+  [ "$rc" = 0 ] || { echo "FAIL: second profile install gave exit $rc"; echo "$out" | tail -5; fail=1; }
+  cmp -s "$T/policy10.changed" "$H/.claude/merge-policy.json" || { echo "FAIL: a second install changed merge-policy.json"; fail=1; }
+  if echo "$out" | grep -q "copied merge-policy.json"; then echo "FAIL: a second install says it copied merge-policy.json"; fail=1; fi
+  # (c) a profile without the file makes none.
+  H="$T/home10b"; mkdir -p "$H/.claude"; rm "$P10/merge-policy.json"
+  out=$(HOME="$H" USERPROFILE="$H" PATH="$T/bin:$PATH" bash "$R/install.sh" --profile "$P10" 2>&1); rc=$?
+  [ "$rc" = 0 ] || { echo "FAIL: install of a profile without a policy gave exit $rc"; echo "$out" | tail -5; fail=1; }
+  [ ! -e "$H/.claude/merge-policy.json" ] || { echo "FAIL: merge-policy.json made from a profile that has none"; fail=1; }
 fi
 
 [ "$fail" = 0 ] && echo "install-check: all tests passed"
