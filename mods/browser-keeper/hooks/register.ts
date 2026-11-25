@@ -97,6 +97,9 @@ export function firstUrl(text: string): { host: string; hostPath: string } | und
   return { host, hostPath: host + (m[2] ?? '').toLowerCase() }
 }
 
+/** localhost, 127.0.0.1 or a name that ends in .localhost, with any port. Never a staging or public host. */
+const LOCAL_DEV_HOST = /^(localhost|127\.0\.0\.1|[a-z0-9-]+(\.[a-z0-9-]+)*\.localhost)(:\d+)?$/
+
 /** The host a sign-in page lives on (or 'this page'), or undefined when the text shows no sign-in page. */
 export function signInHost(text: string): string | undefined {
   const url = firstUrl(text)
@@ -104,6 +107,8 @@ export function signInHost(text: string): string | undefined {
   const byTitle = SIGN_IN_TITLE.test(text)
   const byText = /sign[ -]?in|log[ -]?in/i.test(text) && /password/i.test(text)
   if (!byUrl && !byTitle && !byText) return undefined
+  // A local development host serves the person's own app with seeded test accounts, so no stop there.
+  if (url !== undefined && LOCAL_DEV_HOST.test(url.host)) return undefined
   return url?.host ?? 'this page'
 }
 
