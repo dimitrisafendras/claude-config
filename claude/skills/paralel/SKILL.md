@@ -46,12 +46,29 @@ The user manages **one** session: this one. Lane sessions are internal. A lane n
 6. **Review**, then merge and remove the sub-branch (rule 5). The lane then opens its PR and fixes it until CI is green (`references/keep-it-running.md`, 7).
 7. **Relay the outcome** with evidence. Check "green" or "merged" with one call first.
 8. **Escalate one step only on evidence:** first the effort, then the tier.
-9. **After a merge, deploy and verify:** UI lanes run the `deploy` skill; a ticket is done only after `verified` (`references/keep-it-running.md`, 4).
+9. **After a merge, deploy and verify:** the `deploy` skill starts by itself from `ci-watch`; a ticket is done only after `verified` (`references/keep-it-running.md`, 4).
 10. **Clean up at the end:** sweep orphan worktrees, remove merged lane worktrees and branches, stop what you started, offer to archive the lane sessions (`references/lanes.md`, Phase 5; `references/cleaning-up-worktrees.md`).
 
 Reprint the ledger table on every state change (`references/dispatch-loop.md`) and write it to the ledger file first, so a crash or a compaction cannot lose it. Keep the ticket board current.
 
 Each lane has done criteria and a check that it must pass (`keep-it-running.md`, 6). Lanes never wait for the user, a silent or dead lane gets one check and one restart, and the installed mods (`ci-watch`, `memory-governor`, `merge-policy`, `ops-board`) do their part: `references/keep-it-running.md`.
+
+## Lane loop
+
+Each lane is a loop with no person in it: work → PR → reviewer → fix red CI and conflicts (at most 3 automatic tries for each PR) → merge on green under `merge-policy` → deploy check → verify on staging → close the ticket → `cleanup`. `ci-watch` wakes the lane at each CI event. Each lane writes the `next` field of its ticket row (up to 90 characters: what happens next and when). Each lane ends `done` or `needs-you`. Check the kill switch first (`bash ~/.claude/autonomy.sh check`). Stages and limits: `references/lane-loop.md`. A person is still needed for: a production release (a release tag), any message to other people, money, secrets, sign-ins and destructive data actions. These only become decision records. `/autonomy run lane <ticket>` runs one lane loop now.
+
+## Decisions
+
+A lane that cannot go on writes one decision record (JSON) in its ticket and in its report, then ends `needs-you`:
+
+```json
+{"id": "d-0001", "ticket": "SN-123", "question": "Release v1.4 to production?", "options": ["release now", "wait"], "default": "wait", "deadline": "2026-11-26T09:00:00Z", "reversible": true}
+```
+
+- `id`: a unique string. `ticket`: the ticket id or `null`. `options`: two strings. `default`: one of the options. `deadline`: an ISO time. `reversible`: true or false.
+- A reversible record takes its `default` at the `deadline`. An irreversible one never does: it waits for a person.
+- Write a production release, a message to other people, money, secrets, sign-ins and destructive data actions as irreversible. Never take them by default.
+- The flow-view mod shows open records in its Decisions card.
 
 ## `/paralel status`
 
@@ -67,6 +84,7 @@ With the argument `status`, dispatch nothing and plan nothing. If this session h
 - `references/review-protocol.md`: reviewer size, input, findings. Read before each reviewer.
 - `references/branches-and-worktrees.md`: feature branch, sub-branches, merging, hot files. Read before the first branch.
 - `references/cleaning-up-worktrees.md`: removal commands, refusals, wind-down sweep. Read before the first merge and at wind-down.
+- `references/lane-loop.md`: the lane loop: stages, limits, `next`, the end states. Read when a lane starts or wakes.
 - `references/finishing-ci-and-merge.md`: leaving draft, watching CI, admin-merge to `main`. Read when CI runs or a merge is near.
 - `references/keep-the-board-current.md`: ticket statuses and comments (canonical). Read when a ticket is involved.
 - `references/guardrails-detail.md`: guardrails that never relax. Read before the first prompt and any outward action.

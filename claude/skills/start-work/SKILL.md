@@ -8,12 +8,12 @@ effort: medium
 
 # Start work
 
-One command for the whole day: housekeeping, inbox, one plan, start, and a live monitor page. The user types `/start-work` and does not choose an environment or a mode.
+One command for the whole day: housekeeping, inbox, one plan, start, and a live monitor page. No choice of environment or mode.
 
 ## Scope: all projects or one
 
 - **No argument:** all projects. The day document id is `<date>`.
-- **A project folder** (a first column of `list-projects.sh`): that project only. Run `morning.sh <folder>`, read only the extra sources of that project, and use the day document id `<date>_<folder>` (its `date` field holds the same text). Two project runs on one day do not touch each other's rows.
+- **A project folder** (a first column of `list-projects.sh`): that project only. Run `morning.sh <folder>`, read only the extra sources of that project, and use the day document id `<date>_<folder>` (its `date` field holds the same text). 
 - **A surface** (`web`, `mobile`, `backend`, `infra`): all projects, and the plan keeps only the rows of that surface.
 
 **Project skills.** A project can have its own skills. An extra source file names them in its coordinates (`Dispatcher`, `Cleanup`, `Environment skill`). For rows and housekeeping of that project, use the named skill in place of `paralel`, `cleanup` or the generic environment skill.
@@ -34,10 +34,10 @@ Read today's day document of the scope. When its `phase` is `inbox` and its `upd
 
 ## Stage 1 — Housekeeping (no questions)
 
-1. Run `bash ~/.claude/skills/start-work/morning.sh` (about 10 s; add the folder for a project run). It fetches every repo, fast-forwards the default branch only when the main checkout is on it and clean, and lists your open PRs with a CI verdict. It never switches branches, stashes or merges. Keep its JSON for stage 2.
-2. Start the cleanup skill (the project's own when a source names one) in a background agent (`general-purpose`, `sonnet`, never a smaller model: this step deletes): dry run, then apply, archive only what its rules allow. A row of the dry run that the rules do not clearly allow is kept and reported. Do not wait for it. Put its counts in the monitor when it reports.
+1. Run `bash ~/.claude/skills/start-work/morning.sh` (add the folder for a project run). It fetches every repo, fast-forwards the default branch only when the main checkout is on it and clean, and lists your open PRs with a CI verdict. Keep its JSON.
+2. Start the cleanup skill (the project's own when a source names one) in a background agent (`general-purpose`, `sonnet`, never a smaller model: this step deletes): dry run, then apply, archive only what its rules allow. A row of the dry run that the rules do not clearly allow is kept and reported. Do not wait.
 3. Check the Claude setup for drift: run `bash "$(cat ~/.claude/claude-config.repo)/install.sh" --check` (`install.sh` writes the path of the repo to that file). When the file is missing, use the folder that the link `~/.claude/skills/start-work` points to, without `/claude/skills/start-work` at the end; when that is not a link, use `~/Projects/claude-config`. Also run `bash <profile>/sync.sh --check` when the active profile folder (named or pathed in `~/.claude/claude-config.profile`) has a `sync.sh`. Exit 0 means no drift. On exit 1, put each printed line in `housekeeping.setupDrift` and add one `needsYou` line ("Claude setup drift: N items, see monitor"). Do not fix drift: run neither script without `--check`.
-4. Check the connections with one cheap call each: `gh` (the script's `github_login`) and the check that each extra source names. A failed one removes only its source from the inbox. Say so in one line, add a `needsYou` line that names the source and the fix (for example "sign in to <server>"), and continue.
+4. Check the connections with one cheap call each: `gh` (the script's `github_login`) and the check that each extra source names. A failed one removes only its source. Add a `needsYou` line with the source and the fix (for example "sign in to <server>"), and continue.
 5. Write the day document to the monitor (see "Work Monitor") with `phase: "housekeeping"` and a `housekeeping` object: repos fetched, repos updated, repos not updated with the script's `note`, worktrees, free memory, setup drift.
 
 ## Stage 2 — Inbox
@@ -56,16 +56,14 @@ Classify each item: surface, severity (1 to 4), difficulty (XS, S, M, L) and mod
 Order:
 1. Severity 4: production incidents, security, new errors that many users hit.
 2. PR fixes (red CI, conflict, changes requested): they are almost done.
-3. Tasks, easiest first (XS, S, M, L); same size: higher severity, then most overdue.
+3. Tasks, easiest first (XS, S, M, L); same size: severity, then most overdue.
 4. Not dispatched, in their own groups: ready to merge, needs you, blocked, in review.
 
 Print the plan as one table (`#`, item link, repo, surface, severity, size · model, why, due). Then write the plan rows to the monitor (`phase: "plan"`) and give the user the monitor link in one line.
 
-**What starts without a question:** severity 4 rows and PR fixes (order groups 1 and 2). They are urgent or almost done, and their scope is fixed by an existing PR or incident.
+**What starts without a question (the day loop):** severity 4 rows, PR fixes (groups 1 and 2) and tasks (group 3) that are not `blocked` and not `needs-you`. Check `bash ~/.claude/autonomy.sh check` first: with the kill switch on, print the plan and start nothing. A `blocked` or `needs-you` row starts nothing; an open choice becomes a decision record (`paralel`, "Decisions"). Where a person is still needed: a production release, a message to other people, money, secrets, sign-ins, destructive data actions.
 
-**What waits for one yes:** tasks (group 3). They start new code work from a classification that can be wrong. Ask once, in one line, with the row numbers ("Start tasks 4 to 9?"). The user can answer yes, name rows, reorder or drop rows. Start groups 1 and 2 while you wait. Without an answer, the tasks stay `queued`.
-
-**Today's cut.** The inbox can hold 50 or more items. Put at most 12 dispatchable rows in the plan (the top of the order), plus the not-dispatched groups. Name the number of the other items in the day document's `headline` ("and 30 more for later"). When a row finishes early in the day, take the next item from the list.
+**Today's cut.** The inbox can hold 50 or more items. Put at most 12 dispatchable rows in the plan (the top of the order), plus the not-dispatched groups. Name the others in the day document's `headline` ("and 30 more for later"). When a row finishes, take the next item.
 
 ## Stage 4 — Start
 
@@ -76,7 +74,7 @@ Group the dispatchable rows into **lanes**: one lane per (repo, surface) pair th
   - Lanes that change the same API or shared library: the contract change goes first, in its own PR from the coordinator.
   - Not more sessions than the memory budget allows. Queue the other lanes and start each when one ends.
 
-Then `phase: "running"`. Every rule for agents, branches, the reviewer gate, merges, CI watching and verification comes from the dispatcher and environment skills when they are installed. This skill does not repeat them.
+Then `phase: "running"`. Each lane then runs the lane loop of `paralel` with no person in it (`references/lane-loop.md` there). The `morning-prep` routine runs this day loop at the start of the day; `/autonomy run morning-prep` runs it once by hand. This skill does not repeat the rules for agents, branches, reviews, merges, CI and verification.
 
 ## Work Monitor
 
@@ -84,7 +82,7 @@ One artifact for every day. Only the coordinating session writes to it, with the
 
 ## Closing the day
 
-When every lane reports done or the user stops: give one summary (PRs, verdicts, what is left), write it to the monitor, and offer to archive the nested sessions. Archive only on the user's yes.
+When every lane reports `done` or `needs-you`, or the user stops: give one summary (PRs, verdicts, open decision records), write it to the monitor, and run `cleanup`. Archive nested sessions only after the PR merged or closed.
 
 ## Boundaries
 
