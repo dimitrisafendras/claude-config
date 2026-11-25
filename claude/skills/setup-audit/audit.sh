@@ -3,6 +3,7 @@
 # Prints one line per finding: LEVEL<TAB>area<TAB>message   (LEVEL: ERROR, WARN, INFO)
 # Exit 1 when there is at least one ERROR, else 0. Changes nothing.
 # Usage: audit.sh [--no-network]   (skips git fetch and gh calls)
+#        audit.sh --routine-drift [routines-dir]   (runs only the routine template drift check)
 set -uo pipefail
 
 NET=1; [ "${1:-}" = "--no-network" ] && NET=0
@@ -14,6 +15,41 @@ f() { # level area message
   printf '%s\t%s\t%s\n' "$1" "$2" "$3"
   [ "$1" = ERROR ] && ERRORS=$((ERRORS + 1))
 }
+
+# Routine template drift: project-daily.md and project-morning.md share their hard rules.
+# A hard rule (a "- " line under "Hard rules:") that is in one file and not in the other is a WARN.
+# Numbers do not count (the limits differ). The rules below may be in one file only: they are
+# the difference between the template that starts work (morning) and the one that does not (daily).
+DRIFT_ALLOWED=(
+  'Run stage 1 (housekeeping) and stage 2 (inbox) of the `start-work` skill'
+  'Do not merge, push'
+  'The limits are for this session.'
+  'The dispatcher is the skill'
+  'Start only tickets that are ready'
+  'Start no more sessions'
+  'A production release'
+  'Follow the ticket rules'
+)
+hard_rules() {  # hard_rules <file>: the hard-rule lines, numbers replaced by N, allowed lines removed
+  local l a
+  while IFS= read -r l; do
+    for a in "${DRIFT_ALLOWED[@]}"; do [ "${l#"$a"}" != "$l" ] && continue 2; done
+    printf '%s\n' "$l" | sed -E 's/[0-9]+/N/g'
+  done < <(awk '/^Hard rules:/{i=1;next} i&&/^- /{sub(/^- /,""); print; next} i&&!/^[[:space:]]/{exit}' "$1")
+}
+DRIFT=0
+routine_drift() {  # routine_drift <routines-dir>
+  local a="$1/project-daily.md" b="$1/project-morning.md" l
+  [ -f "$a" ] && [ -f "$b" ] || return 0
+  while IFS= read -r l; do DRIFT=1; f WARN routine-drift "project-daily.md has a hard rule that project-morning.md has not: ${l:0:120}"; done \
+    < <(LC_ALL=C comm -23 <(hard_rules "$a" | LC_ALL=C sort -u) <(hard_rules "$b" | LC_ALL=C sort -u))
+  while IFS= read -r l; do DRIFT=1; f WARN routine-drift "project-morning.md has a hard rule that project-daily.md has not: ${l:0:120}"; done \
+    < <(LC_ALL=C comm -13 <(hard_rules "$a" | LC_ALL=C sort -u) <(hard_rules "$b" | LC_ALL=C sort -u))
+}
+if [ "${1:-}" = "--routine-drift" ]; then  # exit 1 when there is drift
+  routine_drift "${2:-$ROOT/routines}"
+  exit "$DRIFT"
+fi
 
 # 1. install and sync drift (they check the main checkout, where the links point)
 if [ -x "$MAIN/install.sh" ]; then
@@ -77,6 +113,9 @@ for d in "$ROOT"/claude/skills/*/ "$ROOT"/profiles/*/skills/*/ ${PDIR:+"$PDIR"/s
   printf '%s\n' "$fm" | grep -q '^effort:' || f INFO skill-effort "$n has no effort"
 done
 
+# 4b. routine templates: the hard rules of project-daily.md and project-morning.md must not drift
+routine_drift "$ROOT/routines"
+
 # 5. stale text: removed plugins and paths that do not exist
 files=$(find "$ROOT/claude" "$ROOT/routines" "$ROOT/profiles" "$ROOT/README.md" \( -name '*.md' -o -name '*.sh' -o -name '*.conf' \) -type f 2>/dev/null | grep -v -F "$ROOT/.claude/worktrees/")
 [ -n "$files" ] || files=/dev/null
@@ -89,7 +128,7 @@ while IFS=$'\t' read -r file path; do
   case "$path" in *'<'*|*'*'*|*'$'*|*'…'*|*'...'*) continue;; esac
   exp=${path/#\~/$HOME}
   case "$exp" in  # files that only exist at run time, after an install or after the user creates them
-    "$HOME"/.claude/claude-config.repo|"$HOME"/.claude/backups/*|"$HOME"/.claude/cheat-buttons.json|"$HOME"/.claude/merge-policy.json|"$HOME"/.claude/routines/*|"$HOME"/.claude/paralel|"$HOME"/.claude/paralel/*) continue;;
+    "$HOME"/.claude/claude-config.repo|"$HOME"/.claude/backups/*|"$HOME"/.claude/cheat-buttons.json|"$HOME"/.claude/merge-policy.json|"$HOME"/.claude/routines/*|"$HOME"/.claude/paralel|"$HOME"/.claude/paralel/*|"$HOME"/.claude/autonomy.off|"$HOME"/.claude/autonomy/*) continue;;
   esac
   [ -e "$exp" ] || f WARN stale-path "${file#"$ROOT"/}: $path does not exist"
 done < <(grep -o -H -E '~/(\.claude|Projects)/[A-Za-z0-9_./-]+' $files 2>/dev/null | sed 's/:/\t/' | sed -E 's/[.,;:)]+$//' | sort -u)

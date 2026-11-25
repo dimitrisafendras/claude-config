@@ -76,3 +76,15 @@ export function retakeBudget(times: readonly number[], now: number): { times: nu
 
   return { times: [...recent, now], isAllowed: true }
 }
+
+/**
+ * The other plugin that owns the theme, from the origin of a theme call: a plugin name that is not this mod. The
+ * engine itself (the person's own /theme), a client and a settings hook are not owners.
+ */
+export function otherOwner(origin: { plugin: string; tier: string } | undefined, self: string): string | undefined {
+  if (origin === undefined) return undefined
+  const name = origin.plugin
+  if (name === '' || name === self || origin.tier === 'core') return undefined
+  if (name === 'engine' || name === 'client' || name.startsWith('hook:')) return undefined
+  return name
+}

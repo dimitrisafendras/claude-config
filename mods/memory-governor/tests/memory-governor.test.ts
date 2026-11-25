@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
+import { automaticSource, capMessage, dayOf, parseCount, takeTurn } from '../hooks/register'
+
 // Nothing sits beneath the plugin: each hook here stands for the engine.
 function engine(on: On, budget: { line: string; exitCode: number }, env: Record<string, string> = { HOME: '/Users/test' }) {
   const runs: string[][] = []
@@ -120,4 +122,115 @@ test('with no HOME (Windows) the budget script comes from USERPROFILE', async ($
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(runs[0]).toEqual(['bash', 'C:/Users/me/.claude/mem-budget.sh'])
+})
+
+// ---------- the shared daily cap of automatic turns ----------
+
+const NOW = Date.parse('2026-11-25T12:00:00')
+const TURNS = '/Users/test/.claude/autonomy/turns.json'
+
+test('automaticSource: plugin, scheduled and coordinator prompts are automatic; a person is not', () => {
+  expect(automaticSource({ kind: 'plugin', name: 'ci-watch' })).toBe('ci-watch')
+  expect(automaticSource({ kind: 'scheduled-trigger' })).toBe('scheduled task')
+  expect(automaticSource({ kind: 'coordinator' })).toBe('coordinator hand-off')
+  expect(automaticSource({ kind: 'composer' })).toBeUndefined()
+  expect(automaticSource({ kind: 'peer-send-message' })).toBeUndefined()
+  expect(automaticSource(undefined)).toBeUndefined()
+})
+
+test('parseCount and takeTurn: one count per local day, refused at the cap', () => {
+  const day = dayOf(NOW)
+  expect(day).toBe('2026-11-25')
+  expect(parseCount(undefined, day)).toEqual({ day, count: 0, cap: 60, by: {} })
+  expect(parseCount('not json', day).count).toBe(0)
+  expect(parseCount(JSON.stringify({ day: '2026-11-24', count: 59, by: {} }), day).count).toBe(0)
+  const old = parseCount(JSON.stringify({ day, count: 3, by: { 'ci-watch': 3 } }), day)
+  const one = takeTurn(old, 'ops-board')
+  expect(one.isAllowed).toBe(true)
+  expect(one.count).toEqual({ day, count: 4, cap: 60, by: { 'ci-watch': 3, 'ops-board': 1 } })
+  const full = takeTurn({ day, count: 60, cap: 60, by: {} }, 'ci-watch')
+  expect(full.isAllowed).toBe(false)
+  expect(full.count.count).toBe(60)
+  expect(capMessage(full.count, 'An automatic turn')).toMatch(/daily cap reached: 60 of 60 automatic turns today \(2026-11-25\), all loops together/)
+})
+
+// A world with a file system: the counter file, its lock folder and mv.
+function capWorld(on: On, start: string | undefined) {
+  const files = new Map<string, string>()
+  if (start !== undefined) files.set(TURNS, start)
+  const dirs = new Set<string>()
+  const toasts: string[] = []
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  mock.env(on, { HOME: '/Users/test' })
+  const done = (exitCode = 0): { value: ProcessRunResult } => ({ value: { exitCode, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', (_, e) => {
+    const [cmd, a, b, c] = e.argv
+    if (cmd === 'mkdir' && a === '-p') return done()
+    if (cmd === 'mkdir' && a !== undefined) {
+      if (dirs.has(a)) return done(1)
+      dirs.add(a)
+      return done()
+    }
+    if (cmd === 'rmdir' && a !== undefined) return done(dirs.delete(a) ? 0 : 1)
+    if (cmd === 'mv' && b !== undefined && c !== undefined) {
+      files.set(c, files.get(b) ?? '')
+      files.delete(b)
+      return done()
+    }
+    return { value: { exitCode: 0, stdout: ROOM.line + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  on('fs.read', (_, e) => ({ value: files.get(e.path) ?? '' }) as never)
+  on('fs.write', (_, e) => {
+    files.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: { command: 'memgov' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  on('tool.call', () => ({ result: {} }))
+  return { files, dirs, toasts }
+}
+
+test('an automatic prompt takes one turn from the shared file; a typed prompt takes none', async ($, on) => {
+  const w = capWorld(on, JSON.stringify({ day: '2026-11-25', count: 5, cap: 60, by: { 'ci-watch': 5 } }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const r = await $.prompt.submit({ text: 'ci: PR 7 is red', wait: false, origin: { kind: 'plugin', name: 'ci-watch' } })
+  expect(r.drop).toBeUndefined()
+  await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } })
+  const saved = JSON.parse(w.files.get(TURNS) ?? '{}')
+  expect(saved).toEqual({ day: '2026-11-25', count: 6, cap: 60, by: { 'ci-watch': 6 } })
+  // The lock is gone and no temp file stays.
+  expect(w.dirs.size).toBe(0)
+  expect([...w.files.keys()]).toEqual([TURNS])
+  const status = await $.command.run({ ...CMD, command: 'memgov', args: 'status' })
+  expect(status.text).toContain('Automatic turns today (2026-11-25, all loops): 6 of 60 (ci-watch 6).')
+})
+
+test('at the cap an automatic prompt is dropped with a clear message and a typed one runs', async ($, on) => {
+  const w = capWorld(on, JSON.stringify({ day: '2026-11-25', count: 60, cap: 60, by: { 'ci-watch': 40, 'scheduled task': 20 } }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const r = await $.prompt.submit({ text: 'run the morning prep', wait: false, origin: { kind: 'scheduled-trigger' } })
+  expect(r.drop).toMatch(/daily cap reached: 60 of 60 automatic turns today/)
+  expect(w.toasts[0]).toMatch(/An automatic turn from scheduled task is refused until local midnight/)
+  // The same automatic turn may not start a new session either.
+  const start = await $.tool.call({ tool: 'mcp__ccd_session__start_session', prompt: 'lane A' } as never)
+  expect(start.deny).toMatch(/A new automatic session is refused/)
+  const typed = await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })
+  expect(typed.drop).toBeUndefined()
+  expect(JSON.parse(w.files.get(TURNS) ?? '{}').count).toBe(60)
+})
+
+test('a count of yesterday starts again at 0', async ($, on) => {
+  const w = capWorld(on, JSON.stringify({ day: '2026-11-24', count: 60, cap: 60, by: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const r = await $.prompt.submit({ text: 'lane B: status?', wait: false, origin: { kind: 'plugin', name: 'ops-board' } })
+  expect(r.drop).toBeUndefined()
+  expect(JSON.parse(w.files.get(TURNS) ?? '{}')).toEqual({ day: '2026-11-25', count: 1, cap: 60, by: { 'ops-board': 1 } })
 })

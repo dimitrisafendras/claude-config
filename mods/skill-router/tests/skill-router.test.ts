@@ -9,6 +9,8 @@ const SKILLS: Record<string, string> = {
   cleanup: '---\nname: cleanup\ndescription: >\n  Clean up dead worktrees. Use when the user says "clean up worktrees".\n---\nbody',
   hidden: '---\nname: hidden\ndescription: Secret. Use when "secret phrase here".\ndisable-model-invocation: true\n---\nbody',
   review: '---\nname: review\ndescription: Review a pull request in depth.\n---\nbody',
+  'setup-audit':
+    '---\nname: setup-audit\ndescription: Audit the config repo itself, read-only. Use for "/setup-audit", "audit my setup", "check the config", "is my setup healthy".\n---\nbody',
 }
 
 type World = { label: { value: string | undefined; calls: number; labels: string[][] }; prompts: (readonly string[] | undefined)[] }
@@ -131,7 +133,7 @@ test('off stops it, on restarts it', async ($, on) => {
 test('reload rebuilds the index', async ($, on) => {
   world(on)
   await start($)
-  expect(await cmd($, 'reload')).toContain('3 skills')
+  expect(await cmd($, 'reload')).toContain('4 skills')
 })
 
 test('with no HOME (Windows) the skills come from USERPROFILE', async ($, on) => {
@@ -139,4 +141,34 @@ test('with no HOME (Windows) the skills come from USERPROFILE', async ($, on) =>
   await start($)
   await send($, 'ok so start my day please')
   expect(w.prompts.at(-1)?.[0]).toContain('the skill "start-work"')
+})
+
+test('setup-audit is not a candidate for an "improve" or "ideas" question', async ($, on) => {
+  const w = world(on)
+  w.label.value = 'setup-audit'
+  await start($)
+  await send($, 'do you see updates we could do to skills and mods to improve the workflow?')
+  expect(w.prompts.at(-1)).toBeUndefined()
+  expect(w.label.calls).toBe(1)
+  expect(w.label.labels[0]).not.toContain('setup-audit')
+  await send($, 'any ideas for new features in the work day dashboard, and what would you add first?')
+  expect(w.prompts.at(-1)).toBeUndefined()
+  expect(w.label.labels[1]).not.toContain('setup-audit')
+})
+
+test('an audit-like request still matches setup-audit', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await send($, 'audit my setup')
+  expect(w.prompts.at(-1)?.[0]).toContain('the skill "setup-audit"')
+  expect(w.label.calls).toBe(0)
+})
+
+test('setup-audit is a classify candidate when the prompt asks to check or verify the repo', async ($, on) => {
+  const w = world(on)
+  w.label.value = 'setup-audit'
+  await start($)
+  await send($, 'can you verify the repo and tell me whether anything has drifted since last week?')
+  expect(w.label.labels[0]).toContain('setup-audit')
+  expect(w.prompts.at(-1)?.[0]).toContain('the skill "setup-audit"')
 })

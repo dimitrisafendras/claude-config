@@ -46,9 +46,9 @@ Person needed: a failed deploy or failed verify (decision record), a sign-in pag
 
 ## 4. Change the setup
 
-Skills `ship-mod`, `setup-audit`, `sync-prefs`. Trigger: routines `weekly-setup-audit`, `weekly-claude-releases`, `config-loop`, `prefs-sync`; or `/ship-mod`.
+Skills `ship-mod`, `setup-audit`, `sync-prefs`. Trigger: routines `weekly-setup-audit`, `weekly-claude-releases`, `loop-health`, `setup-map`, `config-loop`, `prefs-sync`; or `/ship-mod`. `loop-health` finds the loops that never ran or are late; `setup-map` republishes the Setup Map page.
 
-**Local-first rule for a mod change:** edit the mod in the main checkout, run `/reload-plugins`, and use it. Open one PR only after the person approves the result. Then `ship-mod` commits, opens the PR, merges on green, pulls main and installs.
+**Local-first rule for a mod change:** edit the mod in the main checkout, run `/reload-plugins`, and use it. Open one PR only after the person approves the result. Then `ship-mod` commits, opens the PR and hands it to ci-watch, which merges it on green. On the merge turn `ship-mod` pulls main and installs.
 
 Person needed: the approval of a mod change. The loops open PRs for the setup; they do not install mods by themselves.
 
@@ -66,6 +66,8 @@ Person needed: the approval of a mod change. The loops open PRs for the setup; t
 | `config-loop` | Change the setup | routine |
 | `weekly-setup-audit` | Change the setup | routine |
 | `weekly-claude-releases` | Change the setup | routine |
+| `loop-health` | Change the setup | routine |
+| `setup-map` | Change the setup | routine |
 | `prefs-sync` | Change the setup | routine |
 
 Every loop runs by hand with `/autonomy run <loop>`.

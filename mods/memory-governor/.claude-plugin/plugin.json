@@ -1,7 +1,7 @@
 {
   "name": "memory-governor",
-  "version": "0.1.0",
-  "description": "Reads ~/.claude/mem-budget.sh every minute, shows free memory, and refuses new agents and heavy Bash jobs while there is no room.",
+  "version": "0.2.0",
+  "description": "Reads ~/.claude/mem-budget.sh every minute, shows free memory, and refuses new agents and heavy Bash jobs while there is no room. Keeps the daily cap of 60 automatic turns for all loops together in ~/.claude/autonomy/turns.json and drops an automatic turn past it.",
   "author": {
     "name": "claude-config"
   },

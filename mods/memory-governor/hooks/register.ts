@@ -1,7 +1,16 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PromptOrigin, Register } from 'claude-code'
 
 // memory-governor: reads ~/.claude/mem-budget.sh every minute and refuses new
 // agents and heavy Bash jobs while the machine has no room for them.
+//
+// It also keeps the daily cap of automatic turns for all loops together: one
+// counter file, ~/.claude/autonomy/turns.json (next to the run record of
+// autonomy.sh), per local day, shared by every session. A prompt from a
+// plugin ($.prompt.submit: ci-watch, ops-board, ...), a scheduled task or a
+// coordinator hand-off is one automatic turn. Past DAY_CAP the prompt is
+// dropped with a clear message, and an automatic turn may not start a new
+// session. The file is written under a lock folder (mkdir) and moved into
+// place (mv), so two sessions never write half a file or lose a count.
 //
 // mem-budget.sh prints one line:
 //   free=41% total=24576MB heavy_procs=2 room_for_heavy_jobs=0 (floor 30%, ~3500MB/job)
@@ -42,6 +51,56 @@ let lastError: string | undefined
 let isBelowFloor = false
 let denies = 0
 let timer: { cancel: () => void } | undefined
+// True while the running turn started from an automatic prompt.
+let isAutoTurn = false
+
+export const DAY_CAP = 60
+const TURNS_FILE = '.claude/autonomy/turns.json'
+const LOCK_STALE_MS = 30_000
+
+/** The shared count of automatic turns of one local day. */
+export type TurnCount = { day: string; count: number; cap: number; by: Record<string, number> }
+
+const pad = (n: number) => String(n).padStart(2, '0')
+/** The local date of a time, `YYYY-MM-DD`: the key of the daily cap. */
+export function dayOf(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** Who started an automatic turn, from the origin of a prompt; undefined for a person's own prompt. */
+export function automaticSource(origin: PromptOrigin | undefined): string | undefined {
+  if (origin === undefined) return undefined
+  if (origin.kind === 'plugin') return origin.name || 'a plugin'
+  if (origin.kind === 'scheduled-trigger') return 'scheduled task'
+  if (origin.kind === 'coordinator') return 'coordinator hand-off'
+  return undefined
+}
+
+/** The count in the file for `day`: a new day, a missing file or a bad file start at 0. */
+export function parseCount(text: string | undefined, day: string, cap = DAY_CAP): TurnCount {
+  const fresh: TurnCount = { day, count: 0, cap, by: {} }
+  if (text === undefined || text.trim() === '') return fresh
+  try {
+    const j = JSON.parse(text) as Partial<TurnCount>
+    if (j.day !== day || typeof j.count !== 'number' || !Number.isFinite(j.count)) return fresh
+    const by: Record<string, number> = {}
+    for (const [k, v] of Object.entries(j.by ?? {})) if (typeof v === 'number') by[k] = v
+    return { day, count: Math.max(0, Math.floor(j.count)), cap, by }
+  } catch {
+    return fresh
+  }
+}
+
+/** Takes one turn for `who`: the new count, or a refusal at the cap (the count does not change). */
+export function takeTurn(old: TurnCount, who: string): { isAllowed: boolean; count: TurnCount } {
+  if (old.count >= old.cap) return { isAllowed: false, count: old }
+  return { isAllowed: true, count: { ...old, count: old.count + 1, by: { ...old.by, [who]: (old.by[who] ?? 0) + 1 } } }
+}
+
+export function capMessage(c: TurnCount, what: string): string {
+  return `memory-governor: daily cap reached: ${c.count} of ${c.cap} automatic turns today (${c.day}), all loops together. ${what} is refused until local midnight. A prompt you type still runs. The count is in ~/${TURNS_FILE}.`
+}
 
 export function parseReading(stdout: string, exitCode: number, at: number): Reading | undefined {
   const line = stdout.trim().split('\n').pop() ?? ''
@@ -149,6 +208,69 @@ async function current($: EngineInterface): Promise<Reading | undefined> {
   return last
 }
 
+async function homeOf($: EngineInterface): Promise<string | undefined> {
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+  return home ? home.replace(/\\/g, '/').replace(/\/+$/, '') : undefined
+}
+
+async function readCount($: EngineInterface, file: string): Promise<TurnCount> {
+  const day = dayOf(await $.clock.now())
+  const text = (await $.fs.exists(file)) ? await $.fs.read(file) : undefined
+  return parseCount(text, day)
+}
+
+/** Takes the lock folder; a lock older than LOCK_STALE_MS is left by a dead writer and is removed. */
+async function lock($: EngineInterface, dir: string, path: string): Promise<boolean> {
+  await $.process.run(['mkdir', '-p', dir], { timeoutMs: 5_000 })
+  for (let i = 0; i < 20; i++) {
+    const r = await $.process.run(['mkdir', path], { timeoutMs: 5_000 })
+    if (r.exitCode === 0) return true
+    const st = await $.fs.stat(path).catch(() => undefined)
+    if (st !== undefined && (await $.clock.now()) - st.mtimeMs > LOCK_STALE_MS) {
+      await $.process.run(['rmdir', path], { timeoutMs: 5_000 })
+      continue
+    }
+    await $.clock.sleep(100)
+  }
+  return false
+}
+
+/** Takes one automatic turn from the shared counter. Undefined when the counter cannot be used: the turn runs (fails open). */
+async function takeShared($: EngineInterface, who: string): Promise<{ isAllowed: boolean; count: TurnCount } | undefined> {
+  try {
+    const home = await homeOf($)
+    if (!home) throw new Error('HOME and USERPROFILE are not set')
+    const file = `${home}/${TURNS_FILE}`
+    const dir = file.slice(0, file.lastIndexOf('/'))
+    const lockPath = `${file}.lock`
+    if (!(await lock($, dir, lockPath))) throw new Error(`the lock ${lockPath} stays busy`)
+    try {
+      const taken = takeTurn(await readCount($, file), who)
+      if (taken.isAllowed) {
+        const tmp = `${file}.tmp.${await $.clock.now()}.${Math.floor(Math.random() * 1e6)}`
+        await $.fs.write(tmp, JSON.stringify(taken.count) + '\n')
+        const mv = await $.process.run(['mv', '-f', tmp, file], { timeoutMs: 5_000 })
+        if (mv.exitCode !== 0) throw new Error(`mv failed: ${mv.stderr.trim().slice(0, 120)}`)
+      }
+      return taken
+    } finally {
+      await $.process.run(['rmdir', lockPath], { timeoutMs: 5_000 }).catch(() => undefined)
+    }
+  } catch (err) {
+    lastError = `turn counter: ${String(err)}`
+    return undefined
+  }
+}
+
+async function peekShared($: EngineInterface): Promise<TurnCount | undefined> {
+  try {
+    const home = await homeOf($)
+    return home ? await readCount($, `${home}/${TURNS_FILE}`) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const reason = (r: Reading, what: string) =>
   `memory-governor: free memory is ${r.freePct}% (floor ${r.floorPct}%, ${r.heavyProcs} heavy jobs running), no room for ${what}; wait or stop one; /memgov off to disable.`
 
@@ -205,6 +327,36 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e))
 
+  // The daily cap of automatic turns, shared by all loops and sessions. Counted also while /memgov is off.
+  on('prompt.submit', async ($, e, next) => {
+    const who = automaticSource(e.origin)
+    if (who === undefined) {
+      // A prompt that joins a running turn does not change whose turn it is.
+      if (e.turnId === undefined) isAutoTurn = false
+      return next(e)
+    }
+    isAutoTurn = true
+    const taken = await takeShared($, who)
+    if (taken !== undefined && !taken.isAllowed) {
+      const text = capMessage(taken.count, `An automatic turn from ${who}`)
+      $.ui.toast(text)
+      return { drop: text }
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // An automatic turn may not start a new session past the cap.
+  on('tool.call', async ($, e, next) => {
+    try {
+      if (!isAutoTurn || !/__start_session$/.test(e.tool)) return next(e)
+      const c = await peekShared($)
+      if (c !== undefined && c.count >= c.cap) return { deny: capMessage(c, 'A new automatic session') }
+    } catch {
+      // Fails open.
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'memgov' }, async ($, e) => {
     try {
       const sub = e.args.trim().split(/\s+/)[0] || 'status'
@@ -224,6 +376,8 @@ export const register: Register = on => {
       const r = await current($)
       const now = await $.clock.now()
       const age = r ? `${Math.round((now - r.at) / 1000)} s ago (${new Date(r.at).toISOString()})` : '-'
+      const turns = await peekShared($)
+      const by = turns ? Object.entries(turns.by).map(([k, v]) => `${k} ${v}`).join(', ') : ''
       return {
         text: [
           `memory-governor is ${enabled ? 'on' : 'off'}.`,
@@ -233,6 +387,9 @@ export const register: Register = on => {
           `Taken: ${age}.`,
           ...(lastError ? [`Last error: ${lastError}`] : []),
           `Denies made: ${denies}.`,
+          turns
+            ? `Automatic turns today (${turns.day}, all loops): ${turns.count} of ${turns.cap}${by ? ` (${by})` : ''}.`
+            : 'Automatic turns today: the counter cannot be read.',
         ].join('\n'),
       }
     } catch (err) {

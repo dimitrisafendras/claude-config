@@ -34,6 +34,23 @@ export type OpsCi = {
   checkedAt: number
 }
 
+export type OpsLaneHealth = 'ok' | 'silent' | 'dead' | 'done'
+
+export type OpsLane = {
+  /** `<ledger file>#<lane>`. */
+  key: string
+  file: string
+  lane: string
+  label: string
+  state: string
+  health: OpsLaneHealth
+  why: string
+  /** True when this session is the ledger's coordinator: only then does ops-board start a turn for it. */
+  isMine: boolean
+  /** What ops-board did for it: check asked, restart asked, decision written. */
+  done?: string
+}
+
 export type OpsBoard = {
   agents: OpsAgent[]
   spawned: Record<string, { model: string; startedAt: number }>
@@ -47,6 +64,10 @@ export type OpsBoard = {
   backoffMs: number
   isRefreshing: boolean
   ci: Record<string, OpsCi>
+  lanes: OpsLane[]
+  lanesAt: number
+  laneError: string
+  isKillSwitchOn: boolean
 }
 
 declare module 'claude-code' {
