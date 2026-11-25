@@ -23,8 +23,10 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 /** Reads the context window (a free call) and keeps its fill. A change draws the backdrop again. */
 async function refresh($: $): Promise<void> {
   try {
-    const { context } = await $.session.usage()
-    const now = Math.round((context.percent ?? 0) / 5) * 5
+    // The summary breakdown is free and measures against the compaction window, which may be smaller than the model window.
+    const { context } = await $.session.usage({ breakdown: 'summary' })
+    const raw = context.breakdown?.percentage ?? context.percent ?? 0
+    const now = Math.round(Math.min(100, Math.max(0, raw)) / 5) * 5
     if (now !== (await read($, fill))) await update($, fill, () => now)
   } catch {
     // The scene keeps the fill it has.

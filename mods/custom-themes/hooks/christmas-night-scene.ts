@@ -444,7 +444,7 @@ export function sceneOf(percent: number): string {
     drift(top + 44, '#aab6e8', 9) +
     drift(top + 96, '#929fda', 12) +
     dots +
-    sign(180, 96, p) +
+    sign(340, 96, p) +
     `<g class="fall-a" fill="#ffffff" opacity="0.9">${flakes(many, 13, 3.4)}</g>` +
     '</svg>'
   )
