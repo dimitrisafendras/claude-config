@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, phaseParts, groupTickets, progress, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ACTIONS, ago, applyFact, facts, phaseParts, groupTickets, progressParts, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -272,11 +272,29 @@ test('groupTickets puts what needs the person first and what is done last', () =
   expect(groupTickets([])).toEqual([])
 })
 
-test('progress draws a bar with the count and the percent', () => {
-  expect(progress(5, 10, 10)).toBe('█████░░░░░ 5 of 10 done (50%)')
-  expect(progress(0, 4, 4)).toBe('░░░░ 0 of 4 done (0%)')
-  expect(progress(3, 3, 6)).toBe('██████ 3 of 3 done (100%)')
-  expect(progress(0, 0)).toBe('')
+test('the bar of the day has one part for each group, in its colour', () => {
+  const row = (id: string, state: string) => ({ id, title: id, state })
+  const parts = progressParts([row('a', 'verified'), row('b', 'merged'), row('c', 'running'), row('d', 'blocked'), row('e', 'queued')], 10)
+  expect(parts.map(p => `${p.key}:${p.text}`)).toEqual(['done:████', 'running:██', 'blocked:██', 'queued:░░'])
+  expect(new Set(parts.map(p => p.hue)).size).toBe(4)
+  expect(progressParts([], 10)).toEqual([])
+})
+
+test('each step of a ticket has its own colour, and a step to do is dim', () => {
+  const parts = stepParts('review')
+  expect(parts.map(p => p.mark).join('')).toBe('✓✓◉○○')
+  expect(parts[2]?.isNow).toBe(true)
+  expect(new Set(parts.slice(0, 3).map(p => p.hue)).size).toBe(3)
+  expect(parts[3]?.hue).toBe(parts[4]?.hue)
+  expect(stepParts('blocked')).toEqual([])
+})
+
+test('a quick action makes a text that names the ticket', () => {
+  const ref = ticketRef({ id: 'r1', n: 4, title: 'Fix the cart', state: 'review', prNumber: 7, url: 'https://board.test/t/4' })
+  expect(ref).toBe('ticket "#4 Fix the cart" (PR #7) https://board.test/t/4')
+  expect(ACTIONS.map(a => a.key)).toEqual(['ref', 'status', 'continue', 'verify'])
+  expect(ACTIONS[1]?.text(ref)).toContain(ref)
+  expect(ticketRef({ id: 'r2', title: 'No number', state: 'queued' })).toBe('ticket "No number"')
 })
 
 test('stepList names each step and marks the current one', () => {
