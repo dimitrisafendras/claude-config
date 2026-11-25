@@ -285,3 +285,42 @@ test('the Time section counts the messages of the person, not the turns that a n
   expect(await ui.find({ type: 'Text', text: /You: 2 messages/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a group folds, and a ticket shows its steps, its time and the part of the person', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.prompt.submit({ text: 'Start the day', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'Start the day', turnId: 't1' })
+  await $.tool.call({
+    tool: 'ArtifactData',
+    action: 'batch',
+    url: 'https://claude.ai/artifact/x',
+    writes: [
+      { op: 'set', collection: 'days', doc_id: '2026-11-22', data: { phase: 'running' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r01', data: { n: 1, title: 'Fix the cart total', state: 'running', prNumber: 7 } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r02', data: { n: 2, title: 'Add the invoice page', state: 'queued' } },
+    ],
+  } as never)
+  await clock.advance(600_000)
+  await $.turn.complete({ turnId: 't1', reason: 'done', answer: 'Done.' } as never)
+  await clock.advance(120_000)
+  await $.prompt.submit({ text: 'Merge it', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'Merge it', turnId: 't2' })
+  await clock.advance(480_000)
+  await $.tool.call({ tool: 'Bash', command: 'gh pr merge 7 --squash' } as never)
+  await clock.advance(3000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /1 of 2 done/ })).toBeDefined()
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▾ ▌ DONE · 1/)
+  await ui.press({ key: 'fold-done' })
+  expect((await ui.find({ key: 'fold-done' }))?.text).toMatch(/▸ ▌ DONE · 1/)
+  expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
+  expect(await ui.find({ key: 'ticket-r02' })).toBeDefined()
+  await ui.press({ key: 'fold-all' })
+  await ui.press({ key: 'steps' })
+  expect(await ui.find({ type: 'Text', text: /✓ queued {2}→ {2}✓ running {2}→ {2}✓ review {2}→ {2}◉ merged {2}→ {2}○ verified/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Time: 20m 00s · you about 2m 00s \(10%\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Time: not measured/ })).toBeDefined()
+  await ui.unmount()
+})

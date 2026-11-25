@@ -93,6 +93,12 @@ export type Ticket = {
   ci?: string
   session?: string
   note?: string
+  /** When the mod first saw work on the ticket, and when it first saw it done. */
+  startedAt?: number
+  endedAt?: number
+  /** The messages of the person while the ticket was open, and the estimate of their time for it. */
+  mine?: number
+  mineMs?: number
 }
 
 /** A session or an agent that works on the plan. */
@@ -128,6 +134,10 @@ export type View = {
   session: string
   /** The Sessions list shows only the sessions that run. */
   live?: boolean
+  /** The ticket groups that are collapsed. */
+  closed?: string[]
+  /** Each ticket shows its list of steps. */
+  steps?: boolean
 }
 
 declare module 'claude-code' {

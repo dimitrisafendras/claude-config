@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, applyFact, facts, groupTickets, progress, stepOf, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { ago, applyFact, facts, groupTickets, progress, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -277,4 +277,43 @@ test('progress draws a bar with the count and the percent', () => {
   expect(progress(0, 4, 4)).toBe('░░░░ 0 of 4 done (0%)')
   expect(progress(3, 3, 6)).toBe('██████ 3 of 3 done (100%)')
   expect(progress(0, 0)).toBe('')
+})
+
+test('stepList names each step and marks the current one', () => {
+  expect(stepList('review')).toBe('✓ queued  →  ✓ running  →  ◉ review  →  ○ merged  →  ○ verified')
+  expect(stepList('verified')).toBe('✓ queued  →  ✓ running  →  ✓ review  →  ✓ merged  →  ✓ verified')
+  expect(stepList('needs-you')).toBe('! Waits for you')
+  expect(stepList('blocked')).toBe('✗ Blocked')
+})
+
+test('timed starts the time when work starts and ends it when the ticket is done', () => {
+  const queued = timed(undefined, { id: 'r1', title: 'One', state: 'queued' }, 10)
+  expect(queued.startedAt).toBeUndefined()
+  const running = timed(queued, { ...queued, state: 'running' }, 20)
+  expect(running.startedAt).toBe(20)
+  expect(running.endedAt).toBeUndefined()
+  const merged = timed({ ...running, mine: 2, mineMs: 90 }, { id: 'r1', title: 'One', state: 'merged' }, 50)
+  expect(merged).toEqual({ id: 'r1', title: 'One', state: 'merged', startedAt: 20, endedAt: 50, mine: 2, mineMs: 90 })
+  expect(timed(merged, { ...merged, state: 'verified' }, 80).endedAt).toBe(50)
+  expect(timed(merged, { ...merged, state: 'running' }, 90).endedAt).toBeUndefined()
+})
+
+test('shareTime gives the time of the person to the open tickets in equal parts', () => {
+  const day = { id: 'd', phase: 'running', needsYou: [], updatedAt: 1, workers: [], rows: [
+    { id: 'r1', title: 'One', state: 'running', startedAt: 5 },
+    { id: 'r2', title: 'Two', state: 'review', startedAt: 6, mine: 1, mineMs: 10_000 },
+    { id: 'r3', title: 'Three', state: 'merged', startedAt: 1, endedAt: 4 },
+    { id: 'r4', title: 'Four', state: 'queued' },
+  ] }
+  const next = shareTime(day, 60_000, 9)
+  expect(next.rows.map(r => r.mineMs)).toEqual([30_000, 40_000, undefined, undefined])
+  expect(next.rows.map(r => r.mine)).toEqual([1, 2, undefined, undefined])
+  expect(shareTime({ ...day, rows: [day.rows[2]!, day.rows[3]!] }, 60_000, 9).rows[0]?.mineMs).toBeUndefined()
+  expect(shareTime(day, 0, 9)).toBe(day)
+})
+
+test('ticketTime gives the time of the ticket and the part of the person', () => {
+  expect(ticketTime({ id: 'r', title: 'T', state: 'queued' }, 100)).toBe('')
+  expect(ticketTime({ id: 'r', title: 'T', state: 'merged', startedAt: 0, endedAt: 3_600_000, mineMs: 360_000 }, 9_999_999)).toBe('1h 00m · you about 6m 00s (10%)')
+  expect(ticketTime({ id: 'r', title: 'T', state: 'running', startedAt: 0 }, 600_000)).toBe('10m 00s so far · you about 0ms (0%)')
 })

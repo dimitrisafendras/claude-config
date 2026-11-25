@@ -1021,7 +1021,10 @@ function apply(b: Board, w: Write, at: number): Board {
     })
   }
   if (parts[2] === 'rows') {
-    return { ...b, rows: merge<Ticket>(b.rows, w.doc_id, w.op, w.data, ROW_TEXT, ['n', 'sev', 'prNumber']).slice(-MAX_ROWS), updatedAt: at }
+    const old = b.rows.find(t => t.id === w.doc_id)
+    const rows = merge<Ticket>(b.rows, w.doc_id, w.op, w.data, ROW_TEXT, ['n', 'sev', 'prNumber']).map(t => (t.id === w.doc_id ? timed(old, t, at) : t))
+
+    return { ...b, rows: rows.slice(-MAX_ROWS), updatedAt: at }
   }
   if (parts[2] === 'sessions') {
     return { ...b, workers: merge<Worker>(b.workers, w.doc_id, w.op, w.data, WORKER_TEXT, []).slice(-MAX_ROWS), updatedAt: at }
@@ -1091,7 +1094,7 @@ export function applyFact(b: Board, f: Fact, at: number): Board {
     if (to === -1 ? from >= RANK.indexOf('merged') : from > to) return t
     hit = true
 
-    return { ...t, state: f.state }
+    return timed(t, { ...t, state: f.state }, at)
   })
 
   return hit ? { ...b, rows, updatedAt: at } : b
@@ -1112,6 +1115,21 @@ async function observe($: EngineInterface, tool: string, args: Record<string, un
     changed = true
   }
   if (changed) await refresh($)
+}
+
+/** Gives the person's time for one message to the open tickets of the plan that changed last. */
+async function shareWithTickets($: EngineInterface, ms: number, at: number): Promise<void> {
+  let latest: { key: string; b: Board } | undefined
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith('day:') || key === 'day:demo') continue
+    const kept = await safeGet($, key)
+    if (isBoard(kept) && (latest === undefined || kept.updatedAt > latest.b.updatedAt)) latest = { key, b: kept }
+  }
+  if (latest === undefined) return
+  const next = shareTime(latest.b, ms, at)
+  if (next === latest.b) return
+  await $.store.set(latest.key, next)
+  await refresh($)
 }
 
 export function tone(state: string): { status: FlowNode['status']; hue: string } {
@@ -1194,6 +1212,58 @@ export function progress(done: number, total: number, width = 20): string {
   const filled = Math.min(width, Math.max(0, Math.round((done / total) * width)))
 
   return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${done} of ${total} done (${Math.round((done / total) * 100)}%)`
+}
+
+/** The steps of one ticket in a line: done, current, to do. A ticket that is off the way shows why. */
+export function stepList(state: string): string {
+  const { at } = stepOf(state)
+  if (at === undefined) {
+    return state === 'needs-you' ? '! Waits for you' : state === 'blocked' ? '✗ Blocked' : state === 'failed' ? '✗ Failed' : `! ${state}`
+  }
+
+  return STAGES.map((name, i) => `${i + 1 < at ? '✓' : i + 1 === at ? (at === STAGES.length ? '✓' : '◉') : '○'} ${name}`).join('  →  ')
+}
+
+/**
+ * The same ticket with its times kept. Work starts when the ticket first leaves the queue. It ends when the ticket
+ * is first done, and a ticket that opens again has no end.
+ */
+export function timed(old: Ticket | undefined, next: Ticket, at: number): Ticket {
+  const group = bucket(next.state)
+  const startedAt = old?.startedAt ?? (group === 'queued' ? undefined : at)
+  const endedAt = group === 'done' ? (old?.endedAt ?? at) : undefined
+  const out: Ticket = { ...next }
+  if (startedAt !== undefined) out.startedAt = startedAt
+  else delete out.startedAt
+  if (endedAt !== undefined) out.endedAt = endedAt
+  else delete out.endedAt
+  if (old?.mine !== undefined) out.mine = old.mine
+  if (old?.mineMs !== undefined) out.mineMs = old.mineMs
+
+  return out
+}
+
+/** `ms` of the person's time, in equal parts for the tickets that are open (started and not done) at this moment. */
+export function shareTime(b: Board, ms: number, at: number): Board {
+  const open = b.rows.filter(t => t.startedAt !== undefined && t.endedAt === undefined)
+  if (open.length === 0 || ms <= 0) return b
+  const part = ms / open.length
+
+  return {
+    ...b,
+    rows: b.rows.map(t => (open.includes(t) ? { ...t, mine: (t.mine ?? 0) + 1, mineMs: (t.mineMs ?? 0) + part } : t)),
+    updatedAt: at,
+  }
+}
+
+/** How long the ticket took (or takes) and the person's part. '' for a ticket with no start. */
+export function ticketTime(t: Ticket, now: number): string {
+  if (t.startedAt === undefined) return ''
+  const took = Math.max(0, (t.endedAt ?? now) - t.startedAt)
+  const mine = Math.min(t.mineMs ?? 0, took)
+  const part = took > 0 ? Math.round((mine / took) * 100) : 0
+
+  return `${span(took)}${t.endedAt === undefined ? ' so far' : ''} · you about ${span(mine)} (${part}%)`
 }
 
 export function ciMark(t: Ticket): string {
@@ -1451,7 +1521,9 @@ export const register: Register = on => {
     try {
       if (isTyped(e)) {
         const at = await $.clock.now()
-        await update($, flow, f => ({ ...f, me: said(f.me, at) }))
+        const before = (await read($, flow)).me?.mineMs ?? 0
+        const after = await update($, flow, f => ({ ...f, me: said(f.me, at) }))
+        await shareWithTickets($, (after.me?.mineMs ?? 0) - before, at)
       }
     } catch {
       // The time count is a view only: a prompt always goes through.
@@ -1552,6 +1624,11 @@ export const register: Register = on => {
     const live = everyone.filter(p => p.status === 'running').length
     const isDemo = everyone.some(p => p.id.startsWith('demo-'))
     const tab = (name: View['tab']) => () => update($, view, w => ({ ...w, tab: name }))
+    const closed = v.closed ?? []
+    const fold = (group: string) => () =>
+      update($, view, w => ({ ...w, closed: (w.closed ?? []).includes(group) ? (w.closed ?? []).filter(g => g !== group) : [...(w.closed ?? []), group] }))
+    const foldAll = (groups: string[]) => () => update($, view, w => ({ ...w, closed: (w.closed ?? []).length > 0 ? [] : groups }))
+    const showSteps = () => update($, view, w => ({ ...w, steps: w.steps !== true }))
     const openTicket = (id: string) => () => update($, view, w => ({ ...w, ticket: w.ticket === id ? '' : id }))
     const openSession = (id: string) => () => update($, view, w => ({ ...w, session: w.session === id ? '' : id }))
     const time = timeFacts(await read($, flow), now)
@@ -1616,7 +1693,17 @@ export const register: Register = on => {
               </Button>
             )}
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
-            {rows.length > 0 && v.ticket === '' && <Text dimColor>Press a ticket to open its breakdown. Press it again to close it.</Text>}
+            {rows.length > 0 && (
+              <Box flexDirection="row" gap={1} flexWrap="wrap">
+                <Button key="fold-all" variant="secondary" onPress={foldAll(groupTickets(rows).map(g => g.group))}>
+                  {closed.length > 0 ? '▸ Expand all groups' : '▾ Collapse all groups'}
+                </Button>
+                <Button key="steps" variant={v.steps === true ? 'primary' : 'secondary'} onPress={showSteps}>
+                  {v.steps === true ? 'Hide the steps' : 'Show the steps of each ticket'}
+                </Button>
+              </Box>
+            )}
+            {rows.length > 0 && v.ticket === '' && <Text dimColor>Press a group to fold it. Press a ticket to open its steps, time and breakdown.</Text>}
             {matching.length > rows.length && <Text dimColor>+{matching.length - rows.length} more tickets, below the first {rows.length}.</Text>}
             {v.filter === 'all' && sorted.length > 0 && (
               <Text key="progress" bold color={HUE.completed}>
@@ -1630,10 +1717,12 @@ export const register: Register = on => {
             )}
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column">
-                <Text bold color={g.hue}>
-                  ▌ {g.label} · {g.rows.length}
-                </Text>
-                {g.rows.map(r => {
+                <Button key={`fold-${g.group}`} plain onPress={fold(g.group)}>
+                  <Text bold color={g.hue}>
+                    {closed.includes(g.group) ? '▸' : '▾'} ▌ {g.label} · {g.rows.length}
+                  </Text>
+                </Button>
+                {!closed.includes(g.group) && g.rows.map(r => {
                   const isOpen = v.ticket === r.id
                   const facts = ticketFacts(r)
                   const step = stepOf(r.state)
@@ -1641,6 +1730,7 @@ export const register: Register = on => {
                   const isBad = r.state === 'failed' || r.state === 'blocked'
                   const hue = isBad ? HUE.failed : g.hue
                   const ci = ciMark(r)
+                  const time = ticketTime(r, now)
 
                   return (
                     <Box flexDirection="column">
@@ -1660,6 +1750,18 @@ export const register: Register = on => {
                           <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{` · ${ci}`}</Text>
                         ) : null}
                       </Button>
+                      {(isOpen || v.steps === true) && (
+                        <Text color={hue}>
+                          {'   '}
+                          {stepList(r.state)}
+                        </Text>
+                      )}
+                      {(isOpen || v.steps === true) && (
+                        <Text dimColor>
+                          {'   '}
+                          {time !== '' ? `Time: ${time}` : 'Time: not measured (the work started before this view saw the ticket)'}
+                        </Text>
+                      )}
                       {isOpen && facts !== '' && <Text dimColor>{facts}</Text>}
                       {isOpen && r.note !== undefined && <Text color="warning">{clip(r.note, 100)}</Text>}
                       {isOpen && r.url !== undefined && <Text dimColor>{clip(r.url, 100)}</Text>}
