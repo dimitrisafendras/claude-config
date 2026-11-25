@@ -20,7 +20,7 @@ if [ -z "${SETUP_MAP_PROFILE+x}" ] && [ -f "$D/claude-config.profile" ]; then pr
 out="${1:-${SETUP_MAP_OUT:-$D/setup-map.html}}"
 mkdir -p "$(dirname "$out")"
 command -v python3 >/dev/null || { echo "setup-map: python3 is needed" >&2; exit 2; }
-SM_CORE="$core" SM_PROFILE="$profile" SM_OUT="$out" python3 -I - <<'PY_END'
+SM_CORE="$core" SM_PROFILE="$profile" SM_OUT="$out" python3 -X utf8 -I - <<'PY_END'
 import html, os
 e = html.escape
 OUT = os.environ['SM_OUT']

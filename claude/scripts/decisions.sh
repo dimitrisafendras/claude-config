@@ -27,7 +27,7 @@ lock() {
   trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 }
 case "$cmd" in add|resolve|remove) lock;; esac
-DECISIONS_FILE="$F" DECISIONS_CMD="$cmd" python3 -I - "$@" <<'PY_END' || exit $?
+DECISIONS_FILE="$F" DECISIONS_CMD="$cmd" python3 -X utf8 -I - "$@" <<'PY_END' || exit $?
 import json, os, sys, datetime, tempfile, re
 F = os.environ['DECISIONS_FILE']; cmd = os.environ['DECISIONS_CMD']; args = sys.argv[1:]
 def die(m): sys.stderr.write('decisions: ' + m + '\n'); sys.exit(1)
