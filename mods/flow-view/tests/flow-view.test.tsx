@@ -45,7 +45,7 @@ async function drawn(ui: Ui): Promise<string> {
   return (await ui.findAll({ type: 'Svg' })).map(one => String(one.props.source ?? '')).join('\n')
 }
 
-test('a session is one row, and a press opens its steps and agents', async ($, on) => {
+test('a session is a card with its progress, and a button opens its graph', async ($, on) => {
   const clock = world(on)
   await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
   await $.turn.start({ text: 'Fix the login bug', turnId: 't1' })
@@ -71,8 +71,14 @@ test('a session is one row, and a press opens its steps and agents', async ($, o
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-sessions' })
-  expect((await ui.find({ key: 'session-session-1' }))?.text).toMatch(/Fix the login bug.*this session.*1\/2 steps.*1 agent\b/)
-  expect(await drawn(ui)).toBe('')
+  expect(await ui.find({ type: 'Text', text: /Fix the login bug.*this session/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1\/2 steps/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 agent\b/ })).toBeDefined()
+  // The card draws the progress of the plan, with a hover text for each step; the graph is behind a button.
+  const closed = await drawn(ui)
+  expect(closed).toContain('Read the code: done')
+  expect(closed).toContain('Write the fix: now')
+  expect(closed).not.toContain('1 of 2 done')
 
   await ui.press({ key: 'session-session-1' })
   const open = await drawn(ui)
@@ -80,7 +86,19 @@ test('a session is one row, and a press opens its steps and agents', async ($, o
   expect(open).toContain('Bug hunt')
 
   await ui.press({ key: 'session-session-1' })
-  expect(await drawn(ui)).toBe('')
+  expect(await drawn(ui)).not.toContain('1 of 2 done')
+  await ui.unmount()
+})
+
+test('finished sessions are open when they are all there is, and folded when others run', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'Work', turnId: 't1' })
+  await clock.advance(3000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-sessions' })
+  // One session runs now: its group is open and there is no finished group.
+  expect(await ui.find({ key: 'session-session-1' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -92,9 +110,8 @@ test('a system notice does not become the session title', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-sessions' })
-  const row = (await ui.find({ key: 'session-session-1' }))?.text ?? ''
-  expect(row).toContain('web-app')
-  expect(row).not.toContain('task-notification')
+  expect(await ui.find({ type: 'Text', text: /web-app/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /task-notification/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -206,6 +223,9 @@ test('a count tile for queued tickets, and a toggle for the running sessions', a
   expect(await ui.find({ key: 'ticket-r05' })).toBeUndefined()
 
   await ui.press({ key: 'tab-sessions' })
+  // The finished sessions start folded. A press opens the group.
+  expect(await ui.find({ key: 'session-demo-2' })).toBeUndefined()
+  await ui.press({ key: 'sfold-done' })
   expect(await ui.find({ key: 'session-demo-2' })).toBeDefined()
   await ui.press({ key: 'only-live' })
   expect(await ui.find({ key: 'session-demo-2' })).toBeUndefined()

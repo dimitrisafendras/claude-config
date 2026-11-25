@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawOverview, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawOverview, drawProgress, groupSessions, sessionHue, tidyTitle, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -463,4 +463,27 @@ test('a note of the coordinator splits into its reference and the rest', () => {
   expect(splitNote('PR #10189 (agents in chat, draft): needs the owner')).toEqual({ ref: 'PR #10189 (agents in chat, draft):', rest: 'needs the owner' })
   expect(splitNote('CI cost: self-hosted runners')).toEqual({ ref: '', rest: 'CI cost: self-hosted runners' })
   expect(splitNote('  plain note  ')).toEqual({ ref: '', rest: 'plain note' })
+})
+
+test('sessions are in groups: what runs, what needs a look, what is finished', () => {
+  const peer = (id: string, status: string, agents: { status: string }[] = []) => ({ id, title: id, folder: 'f', status, startedAt: 0, updatedAt: 0, stepsDone: 0, stepsTotal: 0, steps: [], agents, calls: 0, started: [] }) as never
+  const groups = groupSessions([peer('a', 'completed'), peer('b', 'running'), peer('c', 'failed'), peer('d', 'completed', [{ status: 'failed' }]), peer('e', 'idle')])
+  expect(groups.map(g => `${g.key}:${g.list.map(p => (p as { id: string }).id).join('')}`)).toEqual(['running:b', 'look:cd', 'done:ae'])
+  expect(groupSessions([])).toEqual([])
+  expect(sessionHue('running')).not.toBe(sessionHue('completed'))
+})
+
+test('a title of a plugin message is plain words', () => {
+  expect(tidyTitle('The ci-watch plugin sent a message: ci-watch now watches   repo#1')).toBe('ci-watch · ci-watch now watches repo#1')
+  expect(tidyTitle('Fix the login bug')).toBe('Fix the login bug')
+})
+
+test('the progress of a session has one segment for each step and a hover text for each', () => {
+  const steps = [{ content: 'Read', status: 'completed' }, { content: 'Fix', status: 'in_progress' }, { content: 'Test', status: 'pending' }] as never
+  const d = drawProgress({ steps, status: 'running' }, '#22d3ee')
+  expect(d.source.match(/<title>/g)).toHaveLength(3)
+  expect(d.source).toContain('<title>Read: done</title>')
+  expect(d.source).toContain('<title>Fix: now</title>')
+  expect(d.source).toContain('<title>Test: to do</title>')
+  expect(drawProgress({ steps: [], status: 'idle' }, '#8b949e').source).toContain('no plan yet')
 })

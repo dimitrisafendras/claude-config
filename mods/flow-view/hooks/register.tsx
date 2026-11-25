@@ -928,6 +928,8 @@ function frame(body: string, tall: number, units = W): Drawing {
 // Monitor with the ArtifactData tool. This mod reads those writes as they
 // go by, and keeps a copy in its store for the panes of all sessions.
 
+/** The groups that start folded: the finished tickets and the finished sessions. The person looks at open work first. */
+const DEFAULT_CLOSED = ['done', 'sessions-done']
 const BLANK: Board = { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 }
 const PHASES = ['housekeeping', 'inbox', 'plan', 'running', 'done']
 const STAGES = ['queued', 'running', 'review', 'merged', 'verified']
@@ -1341,6 +1343,64 @@ export function drawTrack(state: string, hue: string = HUE.running, stop = 1): D
   return frame(svg, 36, wide)
 }
 
+// ---------- the sessions as cards ----------
+
+/** The colour of a session by its status: the same colours as the ticket groups. */
+export function sessionHue(status: Peer['status']): string {
+  return status === 'running' ? HUE.running : status === 'completed' ? HUE.completed : status === 'failed' ? HUE.failed : status === 'stopped' ? HUE.stopped : DIM
+}
+
+export type SessionGroup = { key: 'running' | 'look' | 'done'; label: string; mark: string; hue: string; list: Peer[] }
+
+/**
+ * The sessions in groups, in the order of the list: what runs, then what needs a look (failed, stopped, or with a failed
+ * agent), then what is finished. Each group keeps the order of its input. Empty groups are left out.
+ */
+export function groupSessions(list: Peer[]): SessionGroup[] {
+  const key = (p: Peer): SessionGroup['key'] => (p.status === 'running' ? 'running' : p.status === 'failed' || p.status === 'stopped' || failedAgents(p) > 0 ? 'look' : 'done')
+  const defs: Omit<SessionGroup, 'list'>[] = [
+    { key: 'running', label: 'RUNNING', mark: '◉', hue: HUE.running },
+    { key: 'look', label: 'NEEDS A LOOK', mark: '!', hue: HUE.stopped },
+    { key: 'done', label: 'FINISHED', mark: '✓', hue: HUE.completed },
+  ]
+
+  return defs.map(d => ({ ...d, list: list.filter(p => key(p) === d.key) })).filter(g => g.list.length > 0)
+}
+
+/** A session title in plain words: "The ci-watch plugin sent a message: ..." becomes "ci-watch · ...". */
+export function tidyTitle(title: string): string {
+  return title.replace(/^The (\S+) plugin sent a message:\s*/i, '$1 · ').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * The progress of a session as a small drawing in the colour of its card: one segment for each step of its plan (at
+ * most 12), full when done, glowing when it is the step now, a dim line when it is to do. Each segment has a hover text.
+ * A session with no plan has one dim line.
+ */
+export function drawProgress(p: Pick<Peer, 'steps' | 'status'>, hue: string): Drawing {
+  const steps = p.steps.slice(0, 12)
+  const n = Math.max(1, steps.length)
+  const w = 360
+  const gap = 4
+  const each = (w - gap * (n - 1)) / n
+  let svg = ''
+  if (steps.length === 0) {
+    svg += `<g><title>no plan yet</title><rect x="0" y="6" width="${w}" height="6" rx="3" fill="${EDGE}"/></g>`
+  }
+  steps.forEach((st, i) => {
+    const x = Math.round(i * (each + gap) * 10) / 10
+    const isDone = st.status === 'completed'
+    const isNow = st.status === 'in_progress'
+    const tip = `${st.content}: ${isDone ? 'done' : isNow ? 'now' : 'to do'}`
+    svg +=
+      `<g><title>${esc(clip(tip, 120))}</title>` +
+      `<rect x="${x}" y="0" width="${Math.round(each * 10) / 10}" height="18" fill="#000" fill-opacity="0"/>` +
+      `<rect x="${x}" y="6" width="${Math.round(each * 10) / 10}" height="6" rx="3" fill="${isDone || isNow ? hue : EDGE}"${isNow ? ' filter="url(#glow)"' : ''}${isDone || isNow ? '' : ' fill-opacity="0.8"'}/></g>`
+  })
+
+  return frame(svg, 18, w)
+}
+
 /** The steps of one ticket in a line: done, current, to do. A ticket that is off the way shows why. */
 export function stepList(state: string): string {
   const parts = stepParts(state)
@@ -1532,7 +1592,8 @@ export function drawPhases(b: Board, time?: TimeFacts): Drawing {
 
   // The phases of the day.
   const y = 66
-  const stepX = (W - 30 - x0) / (PHASES.length - 1)
+  // The last label is up to 60 points wide and centred on its step: keep half of it, and the glow, inside the card.
+  const stepX = (W - 48 - x0) / (PHASES.length - 1)
   PHASES.forEach((name, i) => {
     const x = Math.round(x0 + i * stepX)
     const isLast = i === PHASES.length - 1
@@ -1895,16 +1956,16 @@ export const register: Register = on => {
     const isDemo = everyone.some(p => p.id.startsWith('demo-'))
     const tab = (name: View['tab']) => () => update($, view, w => ({ ...w, tab: name }))
     // The done group starts folded: the person looks at the open work first.
-    const closed = v.closed ?? ['done']
+    const closed = v.closed ?? DEFAULT_CLOSED
     const columns = e.props.bodyColumns ?? 80
     const cardWidth = columns >= 90 ? Math.floor((columns - 1) / 2) : columns
     const fold = (group: string) => () =>
       update($, view, w => {
-        const now = w.closed ?? ['done']
+        const now = w.closed ?? DEFAULT_CLOSED
 
         return { ...w, closed: now.includes(group) ? now.filter(g => g !== group) : [...now, group] }
       })
-    const foldAll = (groups: string[]) => () => update($, view, w => ({ ...w, closed: (w.closed ?? ['done']).length > 0 ? [] : groups }))
+    const foldAll = (groups: string[]) => () => update($, view, w => ({ ...w, closed: (w.closed ?? DEFAULT_CLOSED).length > 0 ? [] : groups }))
     const toChat = (r: Ticket, a: (typeof ACTIONS)[number]) => async () => {
       const filled = await $.prompt.fill({ text: a.text(ticketRef(r)), mode: a.mode })
       if (!filled.isFilled) await $.ui.toast('The chat input cannot take the text now. Close the open dialog, then try again.')
@@ -1943,7 +2004,7 @@ export const register: Register = on => {
 
         {!(v.tab === 'tickets' && day.id !== '' && 'Svg' in t) && (
         <Box key="overview" flexDirection="row" gap={2} flexWrap="wrap">
-          {'Svg' in t && sorted.length > 0 && (
+          {v.tab === 'tickets' && 'Svg' in t && sorted.length > 0 && (
             <t.Svg source={drawOverview(sorted).source} width={150} alt={`${count('done')} of ${sorted.length} tickets done.`} />
           )}
           {time !== undefined && (
@@ -2153,59 +2214,108 @@ export const register: Register = on => {
           <Text dimColor>No session data yet. Data shows after the first turn. Press Demo to see samples.</Text>
         )}
 
-        {v.tab === 'sessions' && everyone.length > 1 && (
-          <Button key="only-live" variant="secondary" onPress={() => update($, view, w => ({ ...w, live: !w.live, session: '' }))}>
-            {v.live === true ? `Showing ${live} running of ${everyone.length}. Show all sessions` : `Only running (${live})`}
-          </Button>
+        {v.tab === 'sessions' && everyone.length > 0 && (
+          <Box flexDirection="row" gap={1} flexWrap="wrap">
+            <Button key="sessions-all" variant={v.live !== true ? 'primary' : 'secondary'} onPress={() => update($, view, w => ({ ...w, live: false, session: '' }))}>
+              <Text bold>{everyone.length}</Text> All
+            </Button>
+            <Button key="only-live" variant={v.live === true ? 'primary' : 'secondary'} onPress={() => update($, view, w => ({ ...w, live: true, session: '' }))}>
+              <Text bold color={live > 0 ? HUE.running : 'inactive'}>
+                {live}
+              </Text>{' '}
+              Running
+            </Button>
+          </Box>
         )}
 
         {v.tab === 'sessions' && (
-          <Box flexDirection="column" gap={1}>
-            {all.map(p => {
-              const isOpen = v.session === p.id
+          <Box flexDirection="column" gap="md">
+            {(() => {
+              const groups = groupSessions(all)
+              // Finished sessions start folded, but not when they are all there is: then the tab would be empty.
+              const onlyDone = groups.length === 1 && groups[0]?.key === 'done'
+
+              return groups.map(g => {
+              const isFolded = (v.closed ?? DEFAULT_CLOSED).includes(`sessions-${g.key}`) && !(onlyDone && v.closed === undefined)
 
               return (
-                <Box flexDirection="column">
-                  <Button key={`session-${p.id}`} plain onPress={openSession(p.id)}>
-                    <Text color={tint(p.status)}>{MARK[p.status]}</Text> {clip(p.title, 44)}{' '}
-                    <Text dimColor>
-                      {p.id === me ? 'this session · ' : ''}
-                      {p.stepsTotal > 0 ? `${p.stepsDone}/${p.stepsTotal} steps` : p.status}
-                      {p.agents.length > 0 ? ` · ${plural(p.agents.length, 'agent')}` : ''}
-                      {failedAgents(p) > 0 ? ` · ${failedAgents(p)} failed` : ''}
-                      {p.status !== 'running' ? ` · ${ago(now - p.updatedAt)}` : ''}
-                    </Text>
+                <Box key={`sgroup-${g.key}`} flexDirection="column" gap="sm">
+                  <Button key={`sfold-${g.key}`} variant="secondary" onPress={fold(`sessions-${g.key}`)}>
+                    <Text bold color={g.hue}>
+                      {isFolded ? '▸' : '▾'} {g.mark} {g.label}
+                    </Text>{' '}
+                    <Text dimColor>{g.list.length}</Text>
                   </Button>
-                  {!isOpen && p.status === 'running' && p.step !== undefined && <Text dimColor>{'  '}→ {clip(p.step, 60)}</Text>}
-                  {isOpen && (
-                    <Text dimColor>
-                      {'  '}
-                      {p.folder} · {span(now - p.startedAt)} · {plural(p.calls, 'tool call')}
-                    </Text>
+                  {!isFolded && (
+                    <Box flexDirection="row" flexWrap="wrap" gap="md">
+                      {g.list.map(p => {
+                        const isOpen = v.session === p.id
+                        const hue = p.status === 'completed' || p.status === 'idle' ? (failedAgents(p) > 0 ? HUE.stopped : sessionHue(p.status)) : sessionHue(p.status)
+                        const inner = Math.max(20, cardWidth - 4)
+                        const words = `${p.status === 'completed' ? 'finished' : p.status}${p.stepsTotal > 0 ? ` ${p.stepsDone}/${p.stepsTotal} steps` : ''}`
+                        const meta = [
+                          p.agents.length > 0 ? plural(p.agents.length, 'agent') : '',
+                          failedAgents(p) > 0 ? `${failedAgents(p)} failed` : '',
+                          p.status !== 'running' ? ago(now - p.updatedAt) : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
+
+                        return (
+                          <Box flexDirection="column" width={cardWidth} borderStyle="round" borderColor={hue} paddingX="md" paddingY="sm" gap="sm">
+                            <Text>
+                              <Text bold color={hue}>
+                                {MARK[p.status]}
+                              </Text>{' '}
+                              <Text bold>{clip(tidyTitle(p.title), Math.max(16, cardWidth - 14))}</Text>
+                              {p.id === me && <Text dimColor> · this session</Text>}
+                            </Text>
+                            {'Svg' in t && (
+                              <t.Svg source={drawProgress(p, hue).source} width={Math.round(360 * SCALE)} height={Math.round(18 * SCALE)} isInteractive alt={`${words}`} />
+                            )}
+                            <Box flexDirection="row" gap={1} flexWrap="wrap">
+                              <Text bold color={hue}>
+                                {words}
+                              </Text>
+                              {meta !== '' && <Text dimColor>{meta}</Text>}
+                            </Box>
+                            {p.status === 'running' && p.step !== undefined && <Text>→ {clip(p.step, inner * 2)}</Text>}
+                            <Text dimColor>
+                              {clip(`${p.folder} · ${span(now - p.startedAt)} · ${plural(p.calls, 'tool call')}`, inner)}
+                            </Text>
+                            <Box flexDirection="row" gap={1} flexWrap="wrap">
+                              <Button key={`session-${p.id}`} variant="secondary" onPress={openSession(p.id)}>
+                                {isOpen ? 'Hide graph' : 'Graph'}
+                              </Button>
+                            </Box>
+                            {isOpen && 'Svg' in t && (
+                              <t.Svg source={drawRun(p).source} width={width} alt={`Session ${p.title}: ${p.stepsDone} of ${p.stepsTotal} steps done.`} />
+                            )}
+                            {isOpen && !('Svg' in t) && p.steps.length === 0 && <Text dimColor>No plan yet.</Text>}
+                            {isOpen &&
+                              !('Svg' in t) &&
+                              p.steps.map(st => (
+                                <Text dimColor={st.status === 'completed'} bold={st.status === 'in_progress'}>
+                                  {MARK[st.status]} {clip(st.content, 60)}
+                                </Text>
+                              ))}
+                            {isOpen &&
+                              !('Svg' in t) &&
+                              p.agents.map((a: PeerAgent) => (
+                                <Text color={tint(a.status)}>
+                                  {'  '.repeat(a.depth)}
+                                  {MARK[a.status]} {a.label}
+                                </Text>
+                              ))}
+                          </Box>
+                        )
+                      })}
+                    </Box>
                   )}
-                  {isOpen && 'Svg' in t && (
-                    <t.Svg source={drawRun(p).source} width={width} alt={`Session ${p.title}: ${p.stepsDone} of ${p.stepsTotal} steps done.`} />
-                  )}
-                  {isOpen && !('Svg' in t) && p.steps.length === 0 && <Text dimColor>{'  '}No plan yet.</Text>}
-                  {isOpen &&
-                    !('Svg' in t) &&
-                    p.steps.map(st => (
-                      <Text dimColor={st.status === 'completed'} bold={st.status === 'in_progress'}>
-                        {'  '}
-                        {MARK[st.status]} {clip(st.content, 60)}
-                      </Text>
-                    ))}
-                  {isOpen &&
-                    !('Svg' in t) &&
-                    p.agents.map((a: PeerAgent) => (
-                      <Text color={tint(a.status)}>
-                        {'  '.repeat(a.depth + 1)}
-                        {MARK[a.status]} {a.label}
-                      </Text>
-                    ))}
                 </Box>
               )
-            })}
+              })
+            })()}
             {shown.length > all.length && <Text dimColor>+{shown.length - all.length} more sessions</Text>}
           </Box>
         )}
