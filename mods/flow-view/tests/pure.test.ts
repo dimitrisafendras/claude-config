@@ -189,9 +189,9 @@ test('facts reads a merged pull request and a status move, and nothing else', ()
   expect(facts('Bash', { command: 'cd repo && gh pr merge 10254 -R org/repo --squash' })).toEqual([{ pr: 10254, state: 'merged' }])
   expect(facts('Bash', { command: 'gh pr merge https://github.com/org/repo/pull/7 --squash' })).toEqual([{ pr: 7, state: 'merged' }])
   expect(facts('Bash', { command: 'gh pr view 10254' })).toEqual([])
-  expect(facts('mcp__x__clickup_update_task', { task_id: 'abc123', status: 'In Review' })).toEqual([{ ticket: 'abc123', state: 'review' }])
-  expect(facts('mcp__x__clickup_update_task', { task_id: 'abc123', status: 'backlog' })).toEqual([])
-  expect(facts('mcp__x__clickup_get_task', { task_id: 'abc123', status: 'done' })).toEqual([])
+  expect(facts('mcp__x__update_task', { task_id: 'abc123', status: 'In Review' })).toEqual([{ ticket: 'abc123', state: 'review' }])
+  expect(facts('mcp__x__update_task', { task_id: 'abc123', status: 'backlog' })).toEqual([])
+  expect(facts('mcp__x__get_task', { task_id: 'abc123', status: 'done' })).toEqual([])
 })
 
 test('applyFact moves the matching row forward and never back', () => {

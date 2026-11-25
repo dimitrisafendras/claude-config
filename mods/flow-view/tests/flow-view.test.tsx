@@ -246,7 +246,7 @@ test('a merge and a board move in this session update the ticket without a monit
     ],
   } as never)
   await $.tool.call({ tool: 'Bash', command: 'gh pr merge 7 --squash' } as never)
-  await $.tool.call({ tool: 'mcp__board__clickup_update_task', task_id: 'abc123', status: 'in progress' } as never)
+  await $.tool.call({ tool: 'mcp__board__update_task', task_id: 'abc123', status: 'in progress' } as never)
   await clock.advance(3000)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })

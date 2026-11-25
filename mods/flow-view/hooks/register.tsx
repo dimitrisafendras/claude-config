@@ -996,7 +996,7 @@ export function facts(tool: string, args: Record<string, unknown>): Fact[] {
       out.push({ pr: Number(m[1]), state: 'merged' })
     }
   }
-  if (/clickup_update_task$/.test(tool) && typeof args.task_id === 'string' && typeof args.status === 'string') {
+  if (/update_task$/.test(tool) && typeof args.task_id === 'string' && typeof args.status === 'string') {
     const state = BOARD_STATES[args.status.trim().toLowerCase()]
     if (state !== undefined && /^[A-Za-z0-9-]{3,40}$/.test(args.task_id)) out.push({ ticket: args.task_id, state })
   }
