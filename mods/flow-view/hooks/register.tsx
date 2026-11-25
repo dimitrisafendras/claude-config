@@ -2058,6 +2058,15 @@ export const register: Register = on => {
       ['needs', 'Needs you', HUE.stopped],
       ['queued', 'Queued', DIM],
     ]
+    // A desktop draws a Button as a native button with the label alone: it drops each colour inside it. So a frame
+    // around the button carries the colour that the group has in the ring of the day: a border of one pixel and a
+    // light fill, which shows through the button. `single` gives the frame the corner radius of the button (`round`
+    // gives a larger one), and no padding keeps the frame on the edge of the button. A button with no colour gets a
+    // frame that does not show, so each button has the same size. The terminal gets no frame.
+    const frame = (hue?: string) =>
+      e.surface === 'desktop'
+        ? { padding: 0, borderStyle: 'single', borderColor: hue ?? '#00000000', backgroundColor: hue ? `${hue}59` : undefined }
+        : {}
     const live = everyone.filter(p => p.status === 'running').length
     const isDemo = everyone.some(p => p.id.startsWith('demo-'))
     const tab = (name: View['tab']) => () => update($, view, w => ({ ...w, tab: name }))
@@ -2269,21 +2278,16 @@ export const register: Register = on => {
               {TILES.map(([group, label, hue]) => {
                 const isOn = v.filter === group
                 const dim = v.filter !== 'all' && !isOn
-                // One real button for each tile: no box around a button, so the hover ring is not a second border.
+                // The count keeps its colour on the terminal. On the desktop the frame carries the colour (see `frame`).
                 return (
-                  <Button key={`filter-${group}`} variant={isOn ? 'primary' : 'secondary'} onPress={only(group)}>
-                    {group !== 'all' && count(group) > 0 && !dim ? (
-                      // The count sits on the colour that its arc has in the ring of the day.
-                      <Text bold color={CARD} backgroundColor={hue}>
-                        {` ${count(group)} `}
-                      </Text>
-                    ) : (
+                  <Box key={`tile-${group}`} {...frame(group === 'all' || dim ? undefined : hue)}>
+                    <Button key={`filter-${group}`} variant={isOn ? 'primary' : 'secondary'} onPress={only(group)}>
                       <Text bold color={count(group) > 0 && !dim ? hue : 'inactive'}>
                         {count(group)}
-                      </Text>
-                    )}{' '}
-                    {label}
-                  </Button>
+                      </Text>{' '}
+                      {label}
+                    </Button>
+                  </Box>
                 )
               })}
             </Box>
@@ -2291,12 +2295,14 @@ export const register: Register = on => {
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column" gap="sm">
                 {/* A real button, not plain text: the whole pill is the click area. */}
-                <Button key={`fold-${g.group}`} variant="secondary" onPress={fold(g.group)}>
-                  <Text bold color={g.hue}>
-                    {closed.includes(g.group) ? '▸' : '▾'} {g.mark} {g.label}
-                  </Text>{' '}
-                  <Text dimColor>{g.rows.length}</Text>
-                </Button>
+                <Box key={`fold-row-${g.group}`} alignSelf="flex-start" {...frame(g.hue)}>
+                  <Button key={`fold-${g.group}`} variant="secondary" onPress={fold(g.group)}>
+                    <Text bold color={g.hue}>
+                      {closed.includes(g.group) ? '▸' : '▾'} {g.mark} {g.label}
+                    </Text>{' '}
+                    <Text dimColor>{g.rows.length}</Text>
+                  </Button>
+                </Box>
                 {!closed.includes(g.group) && (
                   <Box flexDirection="row" flexWrap="wrap" gap="md">
                     {g.rows.map(r => {
