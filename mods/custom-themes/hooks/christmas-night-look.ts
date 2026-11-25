@@ -1,6 +1,7 @@
 import type { ThemeSetArgs } from 'claude-code'
 
 import { makeColors } from './make-colors.js'
+import { greenMeter } from './meter'
 import { SCENE } from './christmas-night-scene'
 
 // A dark look only: a winter night. The grays have a deep indigo tint, the accent is warm gold,
@@ -24,11 +25,14 @@ const made = makeColors({
   },
 })
 
+// The accent is a yellow, so the accent fill is green: a meter of the app then does not always read as a warning.
+const colors = greenMeter(made.theme)
+
 /** Contrast notes from makeColors. A line that starts "Desktop won't paint" stops the whole theme. */
 export const PROBLEMS: readonly string[] = made.problems
 
 /** The colors alone: what stays when the app refuses the scene or the style. */
-export const COLORS: ThemeSetArgs = { colors: made.theme, overrideColorScheme: 'dark' }
+export const COLORS: ThemeSetArgs = { colors, overrideColorScheme: 'dark' }
 
 // A message sits on a matte indigo card: flat, solid, no shadow.
 const CARD = { backgroundColor: '#1d2560', radius: 14, padding: 14, shadow: 'none' } as const
@@ -38,7 +42,7 @@ const CARD = { backgroundColor: '#1d2560', radius: 14, padding: 14, shadow: 'non
  * (a light blur, so the shapes of the scene stay in view, and a dark tint, so the rows that a theme cannot give a card stay easy to read: command output, notes of the app, the status line), and matte indigo cards under the messages and tool rows.
  */
 export const LOOK: ThemeSetArgs = {
-  colors: made.theme,
+  colors,
   overrideColorScheme: 'dark',
   backdrop: { scene: SCENE, glass: { blur: 6, tint: '#0b0f2e', opacity: 0.66 } },
   style: {

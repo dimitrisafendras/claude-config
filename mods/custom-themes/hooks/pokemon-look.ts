@@ -1,6 +1,7 @@
 import type { ThemeSetArgs } from 'claude-code'
 
 import { makeColors } from './make-colors.js'
+import { greenMeter } from './meter'
 import { SCENE } from './pokemon-art'
 
 // A dark look only: the navy of a battle menu. The accent is the yellow of the games, danger is their red,
@@ -24,11 +25,14 @@ const made = makeColors({
   },
 })
 
+// The accent is a yellow, so the accent fill is green: a meter of the app then does not always read as a warning.
+const colors = greenMeter(made.theme)
+
 /** Contrast notes from makeColors. A line that starts "Desktop won't paint" stops the whole theme. */
 export const PROBLEMS: readonly string[] = made.problems
 
 /** The colors alone: what stays when the app refuses the scene or the style. */
-export const COLORS: ThemeSetArgs = { colors: made.theme, overrideColorScheme: 'dark' }
+export const COLORS: ThemeSetArgs = { colors, overrideColorScheme: 'dark' }
 
 // A message is a dialog box of the games: a navy fill, a white border, square corners and a hard black shadow.
 const DIALOG = { backgroundColor: '#151c48', borderColor: '#f8f8f0', borderWidth: 3, radius: 4, padding: 14, shadow: { x: 4, y: 4, blur: 0, color: '#000000' } } as const
@@ -38,7 +42,7 @@ const DIALOG = { backgroundColor: '#151c48', borderColor: '#f8f8f0', borderWidth
  * panels, and dialog boxes under the messages. The person's own messages have the yellow border of a chosen menu row.
  */
 export const LOOK: ThemeSetArgs = {
-  colors: made.theme,
+  colors,
   overrideColorScheme: 'dark',
   backdrop: { scene: SCENE, glass: { blur: 10, tint: '#0e1432', opacity: 0.55 } },
   style: {
