@@ -7,7 +7,7 @@ effort: medium
 
 # Setup audit
 
-Check the claude-config repo (`~/Projects/claude-config`) for drift and rot. Report, propose, and change nothing.
+Check the claude-config repo (its main checkout: the path in `~/.claude/claude-config.repo`) for drift and rot. Report, propose, and change nothing.
 
 ## Rules
 

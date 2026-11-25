@@ -88,8 +88,8 @@ done
 while IFS=$'\t' read -r file path; do
   case "$path" in *'<'*|*'*'*|*'$'*|*'…'*|*'...'*) continue;; esac
   exp=${path/#\~/$HOME}
-  case "$exp" in  # files that only exist at run time or after the user creates them
-    "$HOME"/.claude/backups/*|"$HOME"/.claude/cheat-buttons.json|"$HOME"/.claude/merge-policy.json|"$HOME"/.claude/routines/*|"$HOME"/.claude/paralel|"$HOME"/.claude/paralel/*) continue;;
+  case "$exp" in  # files that only exist at run time, after an install or after the user creates them
+    "$HOME"/.claude/claude-config.repo|"$HOME"/.claude/backups/*|"$HOME"/.claude/cheat-buttons.json|"$HOME"/.claude/merge-policy.json|"$HOME"/.claude/routines/*|"$HOME"/.claude/paralel|"$HOME"/.claude/paralel/*) continue;;
   esac
   [ -e "$exp" ] || f WARN stale-path "${file#"$ROOT"/}: $path does not exist"
 done < <(grep -o -H -E '~/(\.claude|Projects)/[A-Za-z0-9_./-]+' $files 2>/dev/null | sed 's/:/\t/' | sed -E 's/[.,;:)]+$//' | sort -u)
@@ -122,16 +122,8 @@ fi
 # 8. mods validate
 # The mods use events that an old CLI does not know (the one on PATH can be older than the app's).
 # So validate with the newest CLI that is installed. CLAUDE_BIN overrides the choice.
-newest_claude() {
-  local c v best="" bestv=""
-  for c in "${CLAUDE_BIN:-}" "$(command -v claude 2>/dev/null)" "$HOME"/Library/Application\ Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude; do
-    [ -n "$c" ] && [ -x "$c" ] || continue
-    v=$("$c" --version 2>/dev/null | awk '{print $1; exit}')
-    [ -n "$v" ] || continue
-    if [ -z "$bestv" ] || [ "$(printf '%s\n%s\n' "$bestv" "$v" | sort -V | tail -1)" = "$v" ]; then best=$c; bestv=$v; fi
-  done
-  [ -n "$best" ] && printf '%s\t%s\n' "$best" "$bestv"
-}
+# shellcheck source=/dev/null  # newest_claude, shared with tests/mods.sh
+. "$ROOT/claude/skills/setup-audit/newest-claude.sh"
 CLAUDE_PICK=$(newest_claude)
 for m in "$ROOT"/mods/*/ "$ROOT"/profiles/*/mods/*/ ${PDIR:+"$PDIR"/mods/*/}; do
   [ -d "$m" ] || continue
