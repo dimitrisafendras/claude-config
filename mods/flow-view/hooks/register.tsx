@@ -1288,36 +1288,50 @@ export function stepParts(state: string, hue: string = HUE.running): StepPart[] 
 }
 
 /**
- * The track of a ticket as a small drawing, in the colour of its card: one dot for each step and a line between
- * them. A done step is full, the current step glows, a step to do is a ring. A ticket that is off the way has the
- * same track with a stop mark in the middle, so each card has the same form.
+ * The step where a ticket that is off the way stopped, from 1 to the number of steps. The state does not say it
+ * (the ticket waits for the person, is blocked or failed), so the facts of the ticket do: a PR means that the
+ * work got to review, a branch, a session or a start time means that it ran, and nothing means that it did not start.
  */
-export function drawTrack(state: string, hue: string = HUE.running): Drawing {
+export function stoppedAt(t: Pick<Ticket, 'prNumber' | 'pr' | 'branch' | 'session' | 'startedAt'>): number {
+  if (t.prNumber !== undefined || t.pr !== undefined) return STAGES.indexOf('review') + 1
+  if (t.branch !== undefined || t.session !== undefined || t.startedAt !== undefined) return STAGES.indexOf('running') + 1
+
+  return 1
+}
+
+/**
+ * The track of a ticket as a small drawing, in the colour of its card: one point for each step and a line between
+ * them. A done step is full, the current step glows, a step to do is a ring. A ticket that is off the way has the
+ * same track: the steps before its stop are full, a stop mark is on the step where it stopped (`stop`, from
+ * stoppedAt), and the steps after it are rings. Each point has a hover text that says what it is.
+ */
+export function drawTrack(state: string, hue: string = HUE.running, stop = 1): Drawing {
   const parts = stepParts(state, hue)
   const gap = 34
   const wide = 10 + (STAGES.length - 1) * gap + 10
+  const why = state === 'needs-you' ? 'waits for you' : state
   let svg = ''
-  if (parts.length === 0) {
-    const mid = wide / 2
-    svg += `<g><title>${esc(state)}: off the way from queued to verified</title><line x1="10" y1="10" x2="${wide - 10}" y2="10" stroke="${hue}" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 6"/>`
-    STAGES.forEach((_, i) => {
-      if (i !== 2) svg += `<circle cx="${10 + i * gap}" cy="10" r="5.5" fill="${CARD}" stroke="${hue}" stroke-opacity="0.45" stroke-width="1.6"/>`
-    })
-    svg += `<circle cx="${mid}" cy="10" r="7.5" fill="${hue}" filter="url(#glow)"/><rect x="${mid - 2.6}" y="7.4" width="5.2" height="5.2" rx="1" fill="${CARD}"/></g>`
-
-    return frame(svg, 20, wide)
-  }
-  parts.forEach((p, i) => {
+  STAGES.forEach((name, i) => {
     const x = 10 + i * gap
-    const isDone = p.mark === '✓'
-    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${isDone || p.isNow ? hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
+    const part = parts[i]
+    const isOff = parts.length === 0
+    const isStop = isOff && i + 1 === stop
+    const isDone = isOff ? i + 1 < stop : part?.mark === '✓'
+    const isNow = !isOff && part?.isNow === true
+    const reached = isDone || isNow || isStop
+    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${reached ? hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
+    const tip = isStop ? `${name}: stopped here, ${why}` : isDone ? `${name}: done` : isNow ? `${name}: now` : `${name}: to do`
     svg +=
-      `<g><title>${esc(p.name)}</title>` +
-      (p.isNow
-        ? `<circle cx="${x}" cy="10" r="7" fill="${hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
-        : isDone
-          ? `<circle cx="${x}" cy="10" r="6" fill="${hue}"/>`
-          : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
+      `<g><title>${esc(tip)}</title>` +
+      // A clear circle under each point makes the hover area larger than the point.
+      `<circle cx="${x}" cy="10" r="10" fill="#000" fill-opacity="0"/>` +
+      (isStop
+        ? `<circle cx="${x}" cy="10" r="7.5" fill="${hue}" filter="url(#glow)"/><rect x="${x - 2.6}" y="7.4" width="5.2" height="5.2" rx="1" fill="${CARD}"/>`
+        : isNow
+          ? `<circle cx="${x}" cy="10" r="7" fill="${hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
+          : isDone
+            ? `<circle cx="${x}" cy="10" r="6" fill="${hue}"/>`
+            : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
       `</g>`
   })
 
@@ -2031,7 +2045,7 @@ export const register: Register = on => {
                       const isBad = r.state === 'failed' || r.state === 'blocked'
                       const hue = isBad ? HUE.failed : g.hue
                       const step = stepOf(r.state)
-                      const track = drawTrack(r.state, hue)
+                      const track = drawTrack(r.state, hue, stoppedAt(r))
                       const ci = ciMark(r)
                       const time = ticketTime(r, now)
                       const crew = ticketCrew(r, day.workers)
@@ -2050,9 +2064,20 @@ export const register: Register = on => {
                             <Text bold>{clip(r.title, Math.max(16, cardWidth - 12))}</Text>
                           </Button>
                           <Box flexDirection="row" gap={1} flexWrap="wrap">
-                            {'Svg' in t && <t.Svg source={track.source} width={Math.round(track.units * SCALE)} alt={step.at === undefined ? r.state : `${r.state} ${step.at} of ${step.total}`} />}
+                            {'Svg' in t && (
+                              <t.Svg
+                                source={track.source}
+                                width={Math.round(track.units * SCALE)}
+                                isInteractive
+                                alt={step.at === undefined ? `${r.state}, stopped at step ${stoppedAt(r)} of ${step.total}` : `${r.state} ${step.at} of ${step.total}`}
+                              />
+                            )}
                             <Text bold color={hue}>
-                              {step.at === undefined ? stepList(r.state).replace(/^[!✗] /, '') : 'Svg' in t ? `${r.state} ${step.at}/${step.total}` : step.text}
+                              {step.at === undefined
+                                ? `${stepList(r.state).replace(/^[!✗] /, '')} · at ${STAGES[stoppedAt(r) - 1]}`
+                                : 'Svg' in t
+                                  ? `${r.state} ${step.at}/${step.total}`
+                                  : step.text}
                             </Text>
                             {r.prNumber !== undefined && <Text dimColor>PR #{r.prNumber}</Text>}
                             {ci !== '' && (

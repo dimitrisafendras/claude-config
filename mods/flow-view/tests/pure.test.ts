@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawOverview, drawTrack, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawOverview, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -284,14 +284,33 @@ test('the steps of a ticket have one colour, the colour of its card, and a step 
   expect(stepParts('blocked')).toEqual([])
 })
 
-test('each card has a track of the same size, also a ticket that is off the way', () => {
+test('each card has a track of the same size, and a ticket that is off the way stops at the step that it got to', () => {
   const on = drawTrack('review', '#c084fc')
-  const off = drawTrack('needs-you', '#fbbf24')
+  const off = drawTrack('needs-you', '#fbbf24', 3)
   expect(off.units).toBe(on.units)
   expect(off.tall).toBe(on.tall)
   expect(on.source).not.toContain('#22d3ee')
-  expect(off.source).toContain('#fbbf24')
-  expect(off.source).toContain('off the way')
+  // Each point has a hover text.
+  expect(on.source.match(/<title>/g)).toHaveLength(5)
+  expect(on.source).toContain('<title>queued: done</title>')
+  expect(on.source).toContain('<title>review: now</title>')
+  expect(on.source).toContain('<title>merged: to do</title>')
+  expect(off.source).toContain('<title>running: done</title>')
+  expect(off.source).toContain('<title>review: stopped here, waits for you</title>')
+  expect(off.source).toContain('<title>verified: to do</title>')
+  // A ticket that did not start stops at the first point: no point before it is full.
+  const first = drawTrack('blocked', '#ff4d5e', 1)
+  expect(first.source).toContain('<title>queued: stopped here, blocked</title>')
+  expect(first.source).not.toContain(': done</title>')
+  // A done ticket has five full points.
+  expect(drawTrack('verified', '#2bd98a').source.match(/: done<\/title>/g)).toHaveLength(5)
+})
+
+test('stoppedAt reads the step from the facts of the ticket', () => {
+  expect(stoppedAt({})).toBe(1)
+  expect(stoppedAt({ branch: 'fix/a' })).toBe(2)
+  expect(stoppedAt({ startedAt: 5 })).toBe(2)
+  expect(stoppedAt({ branch: 'fix/a', prNumber: 7 })).toBe(3)
 })
 
 test('the facts of a card have no dash for a value that is not known, and the crew names the sessions', () => {

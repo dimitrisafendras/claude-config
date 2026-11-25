@@ -111,10 +111,10 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   expect(plan).toContain('START WORK')
   // A card does not open: no breakdown drawing. Each card has a track, also a ticket that is off the way.
   expect(plan).not.toContain('BREAKDOWN')
-  expect(plan).toContain('off the way')
+  expect(plan).toContain('stopped here')
 
   // An active ticket draws its track and shows its quick actions with no press.
-  expect(await drawn(ui)).toContain('<title>running</title>')
+  expect(await drawn(ui)).toContain('<title>running: now</title>')
   expect(await ui.find({ key: 'act-status-r05' })).toBeDefined()
   FILLED.length = 0
   await ui.press({ key: 'act-status-r01' })
