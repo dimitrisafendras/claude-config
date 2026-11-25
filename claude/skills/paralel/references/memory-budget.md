@@ -10,7 +10,7 @@ Parallelism is capped by RAM, not by the number of tickets. On 2026-10-29 the de
 
 ## The script
 
-Run `bash ~/.claude/mem-budget.sh` from any folder. `install.sh` links it from `claude/scripts/`, so it works in every repo. A repo may also hold its own copy in `.claude/skills/paralel/`; it works the same. It prints free %, total memory, heavy processes (vitest, jest, `npm ci`, `npm install`, vite, `tsc -b`, `nx run-many`, `expo start`, metro), and `room_for_heavy_jobs`. Exit 0 means there is room for another heavy job, exit 1 means wait. Tune with `MEM_FLOOR_PCT` (default 30, the % of memory to keep free) and `MEM_JOB_MB` (default 3500, the rough peak of one heavy job). It works on macOS (`memory_pressure`) and Linux (`/proc/meminfo`).
+Run `bash ~/.claude/mem-budget.sh` from any folder. `install.sh` links it from `claude/scripts/`, so it works in every repo. This repo ships no copy in the skill folder; a repo that holds its own copy in `.claude/skills/paralel/` gets the same behaviour. It prints free %, total memory, heavy processes (vitest, jest, `npm ci`, `npm install`, vite, `tsc -b`, `nx run-many`, `expo start`, metro), and `room_for_heavy_jobs`. Exit 0 means there is room for another heavy job, exit 1 means wait. Tune with `MEM_FLOOR_PCT` (default 30, the % of memory to keep free) and `MEM_JOB_MB` (default 3500, the rough peak of one heavy job). It works on macOS (`memory_pressure`) and Linux (`/proc/meminfo`).
 
 ## Rules
 
