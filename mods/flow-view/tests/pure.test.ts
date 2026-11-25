@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawOverview, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { drawOverview, drawTrack, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 
 // Pure helpers: no engine sits beneath these tests.
 
@@ -274,13 +274,32 @@ test('groupTickets puts what needs the person first and what is done last', () =
   expect(groupTickets([])).toEqual([])
 })
 
-test('each step of a ticket has its own colour, and a step to do is dim', () => {
-  const parts = stepParts('review')
+test('the steps of a ticket have one colour, the colour of its card, and a step to do is dim', () => {
+  const parts = stepParts('review', '#c084fc')
   expect(parts.map(p => p.mark).join('')).toBe('✓✓◉○○')
   expect(parts[2]?.isNow).toBe(true)
-  expect(new Set(parts.slice(0, 3).map(p => p.hue)).size).toBe(3)
+  expect(new Set(parts.slice(0, 3).map(p => p.hue))).toEqual(new Set(['#c084fc']))
   expect(parts[3]?.hue).toBe(parts[4]?.hue)
+  expect(parts[3]?.hue).not.toBe('#c084fc')
   expect(stepParts('blocked')).toEqual([])
+})
+
+test('each card has a track of the same size, also a ticket that is off the way', () => {
+  const on = drawTrack('review', '#c084fc')
+  const off = drawTrack('needs-you', '#fbbf24')
+  expect(off.units).toBe(on.units)
+  expect(off.tall).toBe(on.tall)
+  expect(on.source).not.toContain('#22d3ee')
+  expect(off.source).toContain('#fbbf24')
+  expect(off.source).toContain('off the way')
+})
+
+test('the facts of a card have no dash for a value that is not known, and the crew names the sessions', () => {
+  const t = { id: 'r', title: 'T', state: 'needs-you', repo: 'org/app', surface: '-', size: '-', model: '-', sev: 0, source: 'board', ci: 'none' }
+  expect(cardFacts(t)).toBe('org/app · board')
+  const w = [{ id: 's1', name: 'lane', kind: 'session', title: 'Lane web', state: 'running', branch: 'fix/a' }, { id: 'a1', kind: 'agent', title: 'Cart agent', state: 'running', branch: 'fix/a-cart' }]
+  expect(ticketCrew({ id: 'r', title: 'T', state: 'running', branch: 'fix/a', session: 'lane' }, w)).toBe('Lane web · 1 agent (1 run)')
+  expect(ticketCrew({ id: 'q', title: 'T', state: 'queued' }, w)).toBe('')
 })
 
 test('a quick action makes a text that names the ticket', () => {

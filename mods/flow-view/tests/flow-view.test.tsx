@@ -109,8 +109,9 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   expect(await ui.find({ type: 'Text', text: /running 2\/5/ })).toBeDefined()
   const plan = await drawn(ui)
   expect(plan).toContain('START WORK')
-  expect(plan).toContain('BREAKDOWN')
-  expect(plan).toContain('Fix the refresh call')
+  // A card does not open: no breakdown drawing. Each card has a track, also a ticket that is off the way.
+  expect(plan).not.toContain('BREAKDOWN')
+  expect(plan).toContain('off the way')
 
   // An active ticket draws its track and shows its quick actions with no press.
   expect(await drawn(ui)).toContain('<title>running</title>')
@@ -144,7 +145,7 @@ test('the demo plays a day with tickets and several sessions', async ($, on) => 
   await ui.unmount()
 })
 
-test('the plan of /start-work shows as tickets, and a press opens the breakdown', async ($, on) => {
+test('the plan of /start-work shows as tickets, and each card shows its facts with no press', async ($, on) => {
   const clock = world(on)
   await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
   await $.tool.call({
@@ -181,14 +182,13 @@ test('the plan of /start-work shows as tickets, and a press opens the breakdown'
   expect((await ui.find({ key: 'ticket-r02' }))?.text).toMatch(/#2 Add the invoice page/)
   expect(await ui.find({ type: 'Text', text: /review 3\/5/ })).toBeDefined()
 
-  await ui.press({ key: 'ticket-r01' })
-  const open = await drawn(ui)
-  expect(open).toContain('Lane web')
-  expect(open).toContain('Cart agent')
-
+  // Each card names who works on its ticket, with no press. A press on a title puts the name in the chat input.
+  expect(await ui.find({ type: 'Text', text: /Lane web · 1 agent \(1 run\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /shop · web · S · sev 3 · fix\/cart/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /PR #7/ })).toBeDefined()
+  FILLED.length = 0
   await ui.press({ key: 'ticket-r02' })
-  expect(await ui.find({ type: 'Text', text: /PR #7 · CI pending/ })).toBeDefined()
-  expect(await drawn(ui)).not.toContain('Cart agent')
+  expect(FILLED[0]).toMatch(/^insert:ticket "#2 Add the invoice page"/)
   await ui.unmount()
 })
 
@@ -347,10 +347,9 @@ test('a group folds, and a ticket shows its steps, its time and the part of the 
   expect(await ui.find({ key: 'ticket-r01' })).toBeUndefined()
   expect(await ui.find({ key: 'ticket-r02' })).toBeDefined()
   await ui.press({ key: 'fold-done' })
-  await ui.press({ key: 'ticket-r01' })
+  // The time of a ticket shows on its card with no press. A ticket with no time has no time text.
   expect(await ui.find({ type: 'Text', text: /⏱ 20m 00s · you about 2m 00s \(10%\)/ })).toBeDefined()
-  await ui.press({ key: 'ticket-r02' })
-  expect(await ui.find({ type: 'Text', text: /⏱ not measured/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /not measured/ })).toBeUndefined()
   await ui.unmount()
 })
 

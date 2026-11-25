@@ -1152,7 +1152,7 @@ function ticketNodes(t: Ticket, workers: Worker[]): FlowNode[] {
     clean({ id, label, kind, status: tone(state).status, startedAt: 0, calls: 0, errors: 0, parent })
   const out: FlowNode[] = [node(MAIN, `${t.n !== undefined ? `Ticket #${t.n}` : 'Ticket'} · ${clip(t.title, 40)}`, 'ticket', t.state)]
   const mine = workers.filter(
-    w => w.kind !== 'coordinator' && (w.id === t.session || w.name === t.session || (t.branch !== undefined && w.branch === t.branch && w.kind !== 'agent')),
+    w => w.kind !== 'coordinator' && w.kind !== 'agent' && ((t.session !== undefined && (w.id === t.session || w.name === t.session)) || (t.branch !== undefined && w.branch === t.branch)),
   )
   const agents = workers.filter(w => w.kind === 'agent' && t.branch !== undefined && w.branch !== undefined && w.branch.startsWith(t.branch))
   mine.forEach((w, i) => out.push(node(`w${i}`, w.title ?? w.name ?? w.id, w.kind || 'session', w.state)))
@@ -1269,12 +1269,13 @@ export function stepOf(state: string): { at?: number; total: number; text: strin
   return { at, total, text: `${'●'.repeat(at)}${'○'.repeat(total - at)} ${state} ${at}/${total}` }
 }
 
-/** The colour of each step on the way. A step keeps its colour when it is done, so a line of steps is not one colour. */
-const STAGE_HUE = ['#c9d1d9', HUE.running, REVIEW_HUE, '#60a5fa', HUE.completed]
-
-/** The steps of one ticket: done, current, to do, each with its mark and colour. A ticket that is off the way has none. */
+/**
+ * The steps of one ticket: done, current, to do, each with its mark. All steps that are done or current have one
+ * colour, the colour of the card, so the track, the text and the border of a card agree. A ticket that is off the
+ * way (it waits for the person, is blocked or failed) has no steps.
+ */
 export type StepPart = { name: string; mark: string; hue: string; isNow: boolean }
-export function stepParts(state: string): StepPart[] {
+export function stepParts(state: string, hue: string = HUE.running): StepPart[] {
   const { at } = stepOf(state)
   if (at === undefined) return []
 
@@ -1282,31 +1283,45 @@ export function stepParts(state: string): StepPart[] {
     const isDone = i + 1 < at || at === STAGES.length
     const isNow = i + 1 === at && !isDone
 
-    return { name, mark: isDone ? '✓' : isNow ? '◉' : '○', hue: isDone || isNow ? (STAGE_HUE[i] ?? DIM) : DIM, isNow }
+    return { name, mark: isDone ? '✓' : isNow ? '◉' : '○', hue: isDone || isNow ? hue : DIM, isNow }
   })
 }
 
-/** The track of a ticket as a small drawing: one dot for each step, a line between them, the current dot glows. */
-export function drawTrack(state: string): Drawing | undefined {
-  const parts = stepParts(state)
-  if (parts.length === 0) return undefined
+/**
+ * The track of a ticket as a small drawing, in the colour of its card: one dot for each step and a line between
+ * them. A done step is full, the current step glows, a step to do is a ring. A ticket that is off the way has the
+ * same track with a stop mark in the middle, so each card has the same form.
+ */
+export function drawTrack(state: string, hue: string = HUE.running): Drawing {
+  const parts = stepParts(state, hue)
   const gap = 34
+  const wide = 10 + (STAGES.length - 1) * gap + 10
   let svg = ''
+  if (parts.length === 0) {
+    const mid = wide / 2
+    svg += `<g><title>${esc(state)}: off the way from queued to verified</title><line x1="10" y1="10" x2="${wide - 10}" y2="10" stroke="${hue}" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 6"/>`
+    STAGES.forEach((_, i) => {
+      if (i !== 2) svg += `<circle cx="${10 + i * gap}" cy="10" r="5.5" fill="${CARD}" stroke="${hue}" stroke-opacity="0.45" stroke-width="1.6"/>`
+    })
+    svg += `<circle cx="${mid}" cy="10" r="7.5" fill="${hue}" filter="url(#glow)"/><rect x="${mid - 2.6}" y="7.4" width="5.2" height="5.2" rx="1" fill="${CARD}"/></g>`
+
+    return frame(svg, 20, wide)
+  }
   parts.forEach((p, i) => {
     const x = 10 + i * gap
     const isDone = p.mark === '✓'
-    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${isDone || p.isNow ? p.hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
+    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${isDone || p.isNow ? hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
     svg +=
       `<g><title>${esc(p.name)}</title>` +
       (p.isNow
-        ? `<circle cx="${x}" cy="10" r="7" fill="${p.hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
+        ? `<circle cx="${x}" cy="10" r="7" fill="${hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
         : isDone
-          ? `<circle cx="${x}" cy="10" r="6" fill="${p.hue}"/>`
+          ? `<circle cx="${x}" cy="10" r="6" fill="${hue}"/>`
           : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
       `</g>`
   })
 
-  return frame(svg, 20, 10 + (parts.length - 1) * gap + 10)
+  return frame(svg, 20, wide)
 }
 
 /** The steps of one ticket in a line: done, current, to do. A ticket that is off the way shows why. */
@@ -1384,21 +1399,27 @@ export function ciMark(t: Ticket): string {
   return ''
 }
 
-/** The facts line of an open ticket. The PR and its CI stay at the end. */
+/** A value that says something: not empty and not a placeholder dash. */
+const said_ = (v: string | undefined): v is string => v !== undefined && v.trim() !== '' && !/^[-–—]+$/.test(v.trim())
+
+/** The facts of a ticket in one line. The PR and its CI stay at the end. */
 export function ticketFacts(t: Ticket): string {
-  return [
-    t.repo,
-    t.surface,
-    t.size,
-    t.model,
-    t.sev !== undefined ? `sev ${t.sev}` : '',
-    t.branch,
-    t.source,
-    t.prNumber !== undefined ? `PR #${t.prNumber}` : '',
-    t.ci ? `CI ${t.ci}` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  return [...cardFacts(t).split(' · ').filter(Boolean), t.prNumber !== undefined ? `PR #${t.prNumber}` : '', said_(t.ci) ? `CI ${t.ci}` : ''].filter(Boolean).join(' · ')
+}
+
+/** The facts line of a ticket card: where the work is and how large it is. The card gives the PR and the CI on its track row. */
+export function cardFacts(t: Ticket): string {
+  return [t.repo, t.surface, t.size, t.model, t.sev !== undefined && t.sev > 0 ? `sev ${t.sev}` : '', t.branch, t.source].filter(said_).join(' · ')
+}
+
+/** Who works on a ticket, in a few words: its sessions by name and the number of its agents. '' when nobody does yet. */
+export function ticketCrew(t: Ticket, workers: Worker[]): string {
+  const nodes = ticketNodes(t, workers)
+  const sessions = nodes.filter(n => n.id.startsWith('w')).map(n => n.label)
+  const agents = nodes.filter(n => n.id.startsWith('a'))
+  const live = agents.filter(n => n.status === 'running').length
+
+  return [sessions.join(', '), agents.length > 0 ? `${plural(agents.length, 'agent')}${live > 0 ? ` (${live} run)` : ''}` : ''].filter(Boolean).join(' · ')
 }
 
 /** The group of a ticket on the dashboard. */
@@ -1853,7 +1874,6 @@ export const register: Register = on => {
         return { ...w, closed: now.includes(group) ? now.filter(g => g !== group) : [...now, group] }
       })
     const foldAll = (groups: string[]) => () => update($, view, w => ({ ...w, closed: (w.closed ?? ['done']).length > 0 ? [] : groups }))
-    const openTicket = (id: string) => () => update($, view, w => ({ ...w, ticket: w.ticket === id ? '' : id }))
     const toChat = (r: Ticket, a: (typeof ACTIONS)[number]) => async () => {
       const filled = await $.prompt.fill({ text: a.text(ticketRef(r)), mode: a.mode })
       if (!filled.isFilled) await $.ui.toast('The chat input cannot take the text now. Close the open dialog, then try again.')
@@ -2006,71 +2026,50 @@ export const register: Register = on => {
                 {!closed.includes(g.group) && (
                   <Box flexDirection="row" flexWrap="wrap" gap={1}>
                     {g.rows.map(r => {
-                      const isOpen = v.ticket === r.id
-                      const isActive = g.group === 'needs' || g.group === 'running' || g.group === 'review'
-                      const isDone = g.group === 'done'
+                      // One form for each card, in each group: title, track, note, facts, actions. A card does not open
+                      // or fold. Its colour is the colour of its group, or red for a blocked or failed ticket.
                       const isBad = r.state === 'failed' || r.state === 'blocked'
                       const hue = isBad ? HUE.failed : g.hue
                       const step = stepOf(r.state)
-                      const track = drawTrack(r.state)
+                      const track = drawTrack(r.state, hue)
                       const ci = ciMark(r)
                       const time = ticketTime(r, now)
-                      const facts = ticketFacts(r)
+                      const crew = ticketCrew(r, day.workers)
+                      const meta = [crew, time !== '' ? `⏱ ${time}` : ''].filter(Boolean).join(' · ')
+                      const facts = cardFacts(r)
+                      const inner = Math.max(20, cardWidth - 4)
 
                       return (
-                        <Box
-                          flexDirection="column"
-                          width={cardWidth}
-                          borderStyle="round"
-                          borderColor={isOpen || isActive ? hue : 'subtle'}
-                          paddingX={1}
-                        >
-                          <Button key={`ticket-${r.id}`} plain onPress={openTicket(r.id)}>
+                        <Box flexDirection="column" width={cardWidth} borderStyle="round" borderColor={hue} paddingX={1}>
+                          {/* A press on the title puts the name of the ticket in the chat input. The card does not open or fold. */}
+                          <Button key={`ticket-${r.id}`} plain onPress={toChat(r, ACTIONS[0]!)}>
                             <Text bold color={hue}>
                               {isBad ? '✗' : g.mark}
                             </Text>{' '}
                             <Text dimColor>{r.n !== undefined ? `#${r.n} ` : ''}</Text>
-                            <Text bold={!isDone} dimColor={isDone}>
-                              {clip(r.title, Math.max(16, cardWidth - 12))}
-                            </Text>
+                            <Text bold>{clip(r.title, Math.max(16, cardWidth - 12))}</Text>
                           </Button>
                           <Box flexDirection="row" gap={1} flexWrap="wrap">
-                            {track !== undefined && 'Svg' in t ? (
-                              <t.Svg source={track.source} width={Math.round(track.units * SCALE)} alt={`${r.state} ${step.at} of ${step.total}`} />
-                            ) : (
-                              <Text bold color={hue}>
-                                {step.at === undefined ? stepList(r.state) : step.text}
-                              </Text>
-                            )}
-                            {step.at !== undefined && (
-                              <Text color={hue}>
-                                {r.state} {step.at}/{step.total}
-                              </Text>
-                            )}
+                            {'Svg' in t && <t.Svg source={track.source} width={Math.round(track.units * SCALE)} alt={step.at === undefined ? r.state : `${r.state} ${step.at} of ${step.total}`} />}
+                            <Text bold color={hue}>
+                              {step.at === undefined ? stepList(r.state).replace(/^[!✗] /, '') : 'Svg' in t ? `${r.state} ${step.at}/${step.total}` : step.text}
+                            </Text>
                             {r.prNumber !== undefined && <Text dimColor>PR #{r.prNumber}</Text>}
                             {ci !== '' && (
                               <Text color={r.ci === 'red' || r.ci === 'failed' ? HUE.failed : r.ci === 'pending' ? HUE.stopped : HUE.completed}>{ci}</Text>
                             )}
                           </Box>
-                          {isActive && r.note !== undefined && !isOpen && <Text color="warning">{clip(r.note, Math.max(20, cardWidth - 4))}</Text>}
-                          {(isOpen || isActive) && (
-                            <Box flexDirection="row" gap={1} flexWrap="wrap">
-                              {ACTIONS.map(a => (
-                                <Button key={`act-${a.key}-${r.id}`} variant="secondary" onPress={toChat(r, a)}>
-                                  {a.label}
-                                </Button>
-                              ))}
-                              {r.url !== undefined && /^https?:\/\//.test(r.url) && <Link href={r.url} label="↗" />}
-                            </Box>
-                          )}
-                          {isOpen && (
-                            <Box flexDirection="column">
-                              <Text dimColor>{time !== '' ? `⏱ ${time}` : '⏱ not measured'}</Text>
-                              {facts !== '' && <Text dimColor>{facts}</Text>}
-                              {r.note !== undefined && <Text color="warning">{clip(r.note, 100)}</Text>}
-                              {'Svg' in t && <t.Svg source={drawTicket(r, day.workers).source} width={width} alt={`Ticket ${r.title}: ${r.state}.`} />}
-                            </Box>
-                          )}
+                          {r.note !== undefined && <Text>{clip(r.note, inner * 2)}</Text>}
+                          {meta !== '' && <Text dimColor>{clip(meta, inner)}</Text>}
+                          {facts !== '' && <Text dimColor>{clip(facts, inner)}</Text>}
+                          <Box flexDirection="row" gap={1} flexWrap="wrap">
+                            {ACTIONS.map(a => (
+                              <Button key={`act-${a.key}-${r.id}`} variant="secondary" onPress={toChat(r, a)}>
+                                {a.label}
+                              </Button>
+                            ))}
+                            {r.url !== undefined && /^https?:\/\//.test(r.url) && <Link href={r.url} label="↗" />}
+                          </Box>
                         </Box>
                       )
                     })}
