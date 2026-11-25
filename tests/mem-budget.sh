@@ -15,9 +15,10 @@ if [ "$(uname)" = "Darwin" ]; then
   exit 0
 fi
 
-# run <meminfo file>: sets OUT, ERR, RC
+# run <meminfo file>: sets OUT, ERR, RC. PROCS is the fake process list (empty = no heavy process).
+PROCS=""
 run() {
-  OUT=$(MEM_BUDGET_MEMINFO="$1" bash "$ROOT/claude/scripts/mem-budget.sh" 2>"$T/err"); RC=$?
+  OUT=$(MEM_BUDGET_MEMINFO="$1" MEM_BUDGET_PROCS="$PROCS" bash "$ROOT/claude/scripts/mem-budget.sh" 2>"$T/err"); RC=$?
   ERR=$(cat "$T/err")
 }
 
@@ -54,6 +55,19 @@ chk "low MemAvailable: exit" "$RC" "1"
 run "$T/empty"
 chk "empty meminfo: exit" "$RC" "1"
 chk "empty meminfo: free" "$(echo "$OUT" | sed -n 's/^free=\([0-9]*\)%.*/\1/p')" "0"
+
+heavy() { echo "$OUT" | sed -n 's/.* heavy_procs=\([0-9]*\) .*/\1/p'; }
+run "$T/nomemavail"; chk "heavy: empty list" "$(heavy)" "0"
+PROCS='"C:\Program Files\Git\usr\bin\grep.exe" -E "vitest|jest|npm ci|npm install|vite( |$)|tsc -b|nx run-many|expo start|metro"'
+run "$T/nomemavail"; chk "heavy: only a grep line" "$(heavy)" "0"
+PROCS='powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process).CommandLine" vitest'
+run "$T/nomemavail"; chk "heavy: only the PowerShell query" "$(heavy)" "0"
+PROCS=$(printf 'bash\nnode /x/node_modules/.bin/vitest run\ngrep -E vitest|jest\n')
+run "$T/nomemavail"; chk "heavy: one vitest line" "$(heavy)" "1"
+chk "heavy: exit and stderr" "$RC$ERR" "0"
+PROCS=$(printf 'node vitest run\nnpm ci\n')
+run "$T/nomemavail"; chk "heavy: two lines" "$(heavy)" "2"
+PROCS=""
 
 [ "$fail" = 0 ] && echo "mem-budget: all tests passed"
 exit "$fail"
