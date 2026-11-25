@@ -7,12 +7,13 @@ export DECISIONS_FILE="$T/d.json"
 S="$ROOT/claude/scripts/decisions.sh"
 fail=0
 chk() { [ "$2" = "$3" ] || { echo "FAIL: $1: got '$2' expected '$3'"; fail=1; }; }
+js() { python3 -X utf8 -c "import json,os;d=json.load(open(os.environ['DECISIONS_FILE']));$1"; }
 bad() { if "$@" >/dev/null 2>&1; then echo "FAIL: should refuse: $*"; fail=1; fi; }
 bash "$S" add --id t1 --ticket T-1 --question "Ship it?" --option yes --option no --default no >/dev/null
-chk "one record" "$(python3 -c "import json;print(len(json.load(open('$DECISIONS_FILE'))))")" 1
-chk "fields" "$(python3 -c "import json;r=json.load(open('$DECISIONS_FILE'))[0];print(sorted(r))")" "['deadline', 'default', 'id', 'options', 'question', 'reversible', 'ticket']"
+chk "one record" "$(js "print(len(d))")" 1
+chk "fields" "$(js "print(sorted(d[0]))")" "['deadline', 'default', 'id', 'options', 'question', 'reversible', 'ticket']"
 bash "$S" add --id t1 --ticket T-1 --question "Ship it now?" --option yes --option no --default yes >/dev/null
-chk "replace by id" "$(python3 -c "import json;d=json.load(open('$DECISIONS_FILE'));print(len(d),d[0]['default'])")" "1 yes"
+chk "replace by id" "$(js "print(len(d),d[0]['default'])")" "1 yes"
 bash "$S" add --id t2 --question "Drop?" --option a --option b --default a --deadline 2020-01-01T00:00:00Z >/dev/null
 bash "$S" add --id t3 --question "Pay?" --option a --option b --default a --deadline 2020-01-01T00:00:00Z --irreversible >/dev/null
 chk "due only reversible and late" "$(bash "$S" due)" "$(printf 't2\ta')"
