@@ -1,0 +1,13 @@
+{
+  "buttons": [
+    { "label": "day", "command": "/start-work", "hint": "Start the working day: housekeeping, inbox and one plan." },
+    { "label": "PRs", "command": "/pr-sweep", "hint": "Find your open PRs and fix red CI, conflicts and comments." },
+    { "label": "monitor", "command": "/monitor", "send": true, "hint": "Read-only status: sessions, open PRs and deploys." },
+    { "label": "deploy", "command": "/deploy", "hint": "From a merged PR to a verified release." },
+    { "label": "browser", "command": "/start-browser", "hint": "Start a Chrome session that Claude can drive." },
+    { "label": "ship", "command": "/ship", "hint": "Commit, push and open the PR, then hand it to ci-watch. Never merges." },
+    { "label": "merge", "command": "/merge-when-green", "hint": "Merge a PR when CI is green. Stops on red CI, conflicts or drafts." },
+    { "label": "clean", "command": "/cleanup", "hint": "Remove dead worktrees and finished sessions." },
+    { "label": "chrome", "command": "/test-in-chrome", "hint": "Run a test plan in the real Chrome and report per step." }
+  ]
+}

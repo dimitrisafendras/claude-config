@@ -1,0 +1,12 @@
+{
+  "name": "context-keeper",
+  "version": "0.1.0",
+  "description": "Keeps a small task-state record (repo, branch, worktree, PRs, plan, the person's decisions) and carries it through compaction.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.289"
+  },
+  "types": "./types/index.d.ts"
+}

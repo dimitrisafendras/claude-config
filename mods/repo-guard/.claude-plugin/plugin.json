@@ -1,0 +1,11 @@
+{
+  "name": "repo-guard",
+  "version": "0.1.0",
+  "description": "Warns when the edited repo's branch is far behind the default branch or the main checkout has local changes; refuses git commit on the default branch and pushes of agent-branded branches where the repo forbids them.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.299"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "buttons": [
+    { "label": "day", "command": "/start-work", "hint": "Start the working day: housekeeping, inbox and one plan." },
+    { "label": "monitor", "command": "/monitor", "send": true, "hint": "Read-only status: sessions, open PRs and deploys." },
+    { "label": "ship", "command": "/ship", "hint": "Commit, push and open the PR, then hand it to ci-watch." },
+    { "label": "merge", "command": "/merge-when-green", "hint": "Merge a PR when CI is green." },
+    { "label": "clean", "command": "/cleanup", "hint": "Remove dead worktrees and finished sessions." }
+  ]
+}

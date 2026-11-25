@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {},
+  "permissions": {
+    "allow": [
+      "Bash(gh pr merge * --repo <owner>/<repo>*)"
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: git ls-files '*.sh' | xargs -n1 bash -n
+      - name: shellcheck
+        run: git ls-files '*.sh' | xargs shellcheck -S warning
+      - name: JSON files parse
+        run: git ls-files '*.json' | xargs -n1 jq empty
+      - name: Skill frontmatter
+        run: |
+          fail=0
+          for f in claude/skills/*/SKILL.md profiles/*/skills/*/SKILL.md; do
+            head -1 "$f" | grep -qx -- '---' || { echo "$f: no frontmatter"; fail=1; }
+            grep -q '^name: ' "$f" || { echo "$f: no name"; fail=1; }
+            grep -q '^description: ' "$f" || { echo "$f: no description"; fail=1; }
+          done
+          exit $fail
+      - name: install.sh --check test
+        run: bash tests/install-check.sh
+      - name: audit.sh through a link
+        run: bash tests/audit-link.sh
+      - name: list-projects.sh test
+        run: bash tests/list-projects.sh
+      - name: prefs-sync.sh test
+        run: bash tests/prefs-sync.sh
+      - name: morning.sh project filter test
+        run: bash tests/morning-project.sh
+      - name: core is generic
+        run: bash tests/core-clean.sh
+      # `claude plugin validate` and `claude plugin test` need no sign-in and no API key.
+      # The version is pinned: --strict type-checks the mods against the types of this build.
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.330
+      - name: Mods validate and test
+        env:
+          DISABLE_AUTOUPDATER: "1"
+        run: bash tests/mods.sh

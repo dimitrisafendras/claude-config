@@ -1,0 +1,12 @@
+{
+  "name": "cheatsheet",
+  "version": "0.1.2",
+  "description": "Adds /cheat (a list of your skills from the live skill files, with the cheat sheet link) and a row of buttons above the prompt that fill or send your main commands.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.287"
+  },
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "ship",
+  "version": "0.3.0",
+  "description": "/ship and the tool mcp__ship__ship commit the local diff with a generated message, push the branch, open or find its pull request (with the given title and body, or generated) and hand it to ci-watch. Never merges.",
+  "userConfig": {
+    "auto_merge": {
+      "type": "string",
+      "title": "Auto-merge",
+      "description": "on: every PR that ship opens gets auto-merge in ci-watch, so a green turn merges it per the repo rules (the merge-policy mod answers the permission). off: ship only watches.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "off"
+    }
+  }
+}

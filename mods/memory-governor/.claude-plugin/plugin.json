@@ -1,0 +1,11 @@
+{
+  "name": "memory-governor",
+  "version": "0.1.0",
+  "description": "Reads ~/.claude/mem-budget.sh every minute, shows free memory, and refuses new agents and heavy Bash jobs while there is no room.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.299"
+  }
+}

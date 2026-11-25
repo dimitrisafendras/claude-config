@@ -1,0 +1,217 @@
+<title>Work Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: status strip and counters, then "needs you", then the plan table, then sessions and housekeeping. */
+:root{
+  --bg:#f4f6f9; --surface:#fff; --line:#dbe0ea; --fg:#192030; --muted:#5a6377; --accent:#2b54c6; --accent-soft:#e4eafb;
+  --run:#2b54c6; --run-soft:#e4eafb; --ok:#2e6a46; --ok-soft:#e3f1e8; --wait:#8d5a00; --wait-soft:#fbefda; --bad:#a6342a; --bad-soft:#f9e5e2; --idle:#5f6878; --idle-soft:#eceff4;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#10131b; --surface:#181d28; --line:#2a3140; --fg:#e2e6ef; --muted:#959fb2; --accent:#8eaaff; --accent-soft:#212b46;
+  --run:#8eaaff; --run-soft:#212b46; --ok:#87cba1; --ok-soft:#1a2c21; --wait:#efb35d; --wait-soft:#342819; --bad:#ff8a7d; --bad-soft:#391e1b; --idle:#a2abbb; --idle-soft:#232a36; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10131b; --surface:#181d28; --line:#2a3140; --fg:#e2e6ef; --muted:#959fb2; --accent:#8eaaff; --accent-soft:#212b46;
+  --run:#8eaaff; --run-soft:#212b46; --ok:#87cba1; --ok-soft:#1a2c21; --wait:#efb35d; --wait-soft:#342819; --bad:#ff8a7d; --bad-soft:#391e1b; --idle:#a2abbb; --idle-soft:#232a36; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14.5px/1.55 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 56px}
+.wrap{max-width:1080px;margin:0 auto;display:grid;gap:22px}
+h1,h2{font-family:var(--f-display);margin:0;line-height:1.15;text-wrap:balance}
+h1{font-size:clamp(26px,4.5vw,34px)} h2{font-size:19px}
+a{color:var(--accent)}
+code,.mono{font-family:var(--f-mono);font-size:12.5px}
+header{padding-top:28px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end;justify-content:space-between}
+header .meta{display:grid;gap:6px}
+.eyebrow{font:500 12px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.headline{color:var(--muted);max-width:70ch}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select{font:500 14px var(--f-body);background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+.banner{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:10px 14px;color:var(--muted)}
+.banner.warn{border-color:var(--wait);color:var(--wait);background:var(--wait-soft)}
+.phases{display:flex;flex-wrap:wrap;gap:6px}
+.phase{font:500 12px var(--f-mono);padding:5px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.phase.done{color:var(--ok);border-color:transparent;background:var(--ok-soft)}
+.phase.now{color:var(--run);border-color:var(--run);background:var(--run-soft)}
+.counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px}
+.count{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:2px}
+.count b{font:700 26px/1.1 var(--f-display);font-variant-numeric:tabular-nums}
+.count span{font-size:12.5px;color:var(--muted)}
+.count.attn{border-color:var(--bad)}
+.pill{display:inline-block;font:500 11px/1 var(--f-mono);letter-spacing:.04em;text-transform:uppercase;padding:4px 7px;border-radius:4px;white-space:nowrap}
+.s-queued,.s-idle,.ci-none{background:var(--idle-soft);color:var(--idle)}
+.s-running,.ci-pending{background:var(--run-soft);color:var(--run)}
+.s-review,.s-waiting{background:var(--wait-soft);color:var(--wait)}
+.s-merged,.s-verified,.s-done,.ci-green{background:var(--ok-soft);color:var(--ok)}
+.s-blocked,.s-failed,.s-needs-you,.ci-red,.s-not-verifiable{background:var(--bad-soft);color:var(--bad)}
+section{display:grid;gap:10px}
+.needs{background:var(--bad-soft);border:1px solid var(--bad);border-radius:8px;padding:12px 16px}
+.needs ul{margin:6px 0 0;padding-left:18px;display:grid;gap:4px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11.5px var(--f-mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--bg);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.n{font-variant-numeric:tabular-nums;color:var(--muted);font-family:var(--f-mono)}
+td .sub{display:block;color:var(--muted);font-size:12.5px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:8px;min-width:0}
+.sess{display:grid;gap:8px}
+.srow{display:flex;gap:10px;align-items:start;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px}
+.srow:first-child{border-top:0;padding-top:0}
+.srow div{min-width:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13.5px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0}
+.report{white-space:pre-wrap;font:13.5px/1.6 var(--f-body);margin:0}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:8px;padding:28px;text-align:center;color:var(--muted);display:grid;gap:6px}
+.empty b{color:var(--fg);font-size:16px}
+footer{color:var(--muted);font-size:12.5px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="meta">
+      <div class="eyebrow" id="eyebrow">/start-work · live</div>
+      <h1 id="title">Work monitor</h1>
+      <div class="headline" id="headline">The page connects to the day's data.</div>
+    </div>
+    <div class="controls">
+      <label for="day" class="eyebrow">Day</label>
+      <select id="day" aria-label="Day"><option>…</option></select>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+  <div class="phases" id="phases" aria-label="Stages"></div>
+  <div class="counts" id="counts"></div>
+  <div class="needs" id="needs" hidden><b>Needs you</b><ul id="needs-list"></ul></div>
+
+  <section>
+    <h2>Plan</h2>
+    <div id="plan"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card"><h2>Sessions and agents</h2><div class="sess" id="sessions"></div></section>
+    <section class="card"><h2>Housekeeping</h2><dl class="kv" id="house"></dl></section>
+  </div>
+
+  <section class="card" id="report-card" hidden><h2>Day report</h2><p class="report" id="report"></p></section>
+
+  <footer id="footer">The coordinating /start-work session writes this page's data. The page only reads it.</footer>
+</div>
+
+<script>
+const PHASES=[["housekeeping","Housekeeping"],["inbox","Inbox"],["plan","Plan"],["running","Running"],["done","Done"]];
+const STATES=[["queued","Queued"],["running","Running"],["review","In review"],["merged","Merged"],["verified","Verified"],["blocked","Blocked"],["needs-you","Needs you"],["failed","Failed"]];
+const $=id=>document.getElementById(id);
+function el(tag,attrs,...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs||{})){if(v==null)continue;if(k==="class")e.className=v;else e.setAttribute(k,v)}for(const c of kids){if(c==null)continue;e.append(c.nodeType?c:String(c))}return e}
+function str(v){return typeof v==="string"?v:(v==null?"":String(v))}
+function safeUrl(u){u=str(u);return /^https:\/\//.test(u)?u:null}
+function link(text,url){const u=safeUrl(url);return u?el("a",{href:u,target:"_blank",rel:"noopener"},text):document.createTextNode(text)}
+function slug(s){return str(s).toLowerCase().replace(/[^a-z-]/g,"-")}
+function pill(state,label,prefix="s-"){return el("span",{class:"pill "+prefix+slug(state)},label||state)}
+function ago(iso){const t=Date.parse(iso);if(!t)return"";const m=Math.round((Date.now()-t)/60000);if(m<1)return"just now";if(m<60)return m+" min ago";const h=Math.round(m/60);return h<24?h+" h ago":Math.round(h/24)+" d ago"}
+function emptyState(msg){return el("div",{class:"empty"},el("b",{},"No run for this day yet"),el("span",{},msg))}
+
+let db=null, days=[], selected=null, unsubs=[], dayDoc=null, rows=[], sessions=[], timer=null;
+
+function showBanner(text,warn){const b=$("banner");b.hidden=!text;b.textContent=text||"";b.className="banner"+(warn?" warn":"")}
+
+function renderDays(){
+  const s=$("day"); s.textContent="";
+  if(!days.length){s.append(el("option",{},"no days yet"));return}
+  for(const d of days){const o=el("option",{value:d},d);if(d===selected)o.selected=true;s.append(o)}
+}
+function renderHeader(){
+  const d=dayDoc||{};
+  $("title").textContent=selected?("Work monitor · "+selected):"Work monitor";
+  $("headline").textContent=str(d.headline)||(selected?"Waiting for the first update from /start-work.":"Run /start-work to start a day. Its plan and progress show here.");
+  $("eyebrow").textContent="/start-work · "+(d.updatedAt?"updated "+ago(str(d.updatedAt)):"live");
+  const ph=$("phases"); ph.textContent="";
+  const cur=PHASES.findIndex(p=>p[0]===d.phase);
+  PHASES.forEach((p,i)=>ph.append(el("span",{class:"phase"+(i<cur||(d.phase==="done"&&i===cur)?" done":i===cur?" now":"")},p[1])));
+}
+function renderCounts(){
+  const c=$("counts"); c.textContent="";
+  const n={}; rows.forEach(r=>{const s=slug(r.state||"queued");n[s]=(n[s]||0)+1});
+  c.append(el("div",{class:"count"},el("b",{},rows.length),el("span",{},"items in plan")));
+  for(const[k,l]of STATES){const v=n[k]||0; if(!v&&["failed","blocked","needs-you"].includes(k))continue;
+    c.append(el("div",{class:"count"+((k==="needs-you"||k==="failed")&&v?" attn":"")},el("b",{},v),el("span",{},l)))}
+  const red=rows.filter(r=>r.ci==="red").length;
+  if(red)c.append(el("div",{class:"count attn"},el("b",{},red),el("span",{},"PRs with red CI")));
+}
+function renderNeeds(){
+  const list=$("needs-list"); list.textContent="";
+  const items=[...(Array.isArray(dayDoc?.needsYou)?dayDoc.needsYou:[]).map(str)];
+  rows.filter(r=>slug(r.state)==="needs-you").forEach(r=>items.push("#"+str(r.n)+" "+str(r.title)+(r.note?" · "+str(r.note):"")));
+  items.forEach(t=>list.append(el("li",{},t)));
+  $("needs").hidden=!items.length;
+}
+function renderPlan(){
+  const box=$("plan"); box.textContent="";
+  if(!rows.length){box.append(emptyState(selected?"The plan appears here after stage 3.":"Type /start-work in Claude Code."));return}
+  const t=el("table",{}),h=el("tr",{});
+  ["#","State","Item","Repo · surface","Size · model","PR · CI","Session","Note"].forEach(x=>h.append(el("th",{},x)));
+  t.append(el("thead",{},h)); const tb=el("tbody",{});
+  for(const r of rows){
+    const pr=r.pr?el("span",{},link("#"+str(r.prNumber||"PR"),r.pr)," ",pill(r.ci||"none",r.ci||"no CI","ci-")):el("span",{class:"sub"},"—");
+    tb.append(el("tr",{},
+      el("td",{class:"n"},str(r.n)),
+      el("td",{},pill(r.state||"queued",(STATES.find(s=>s[0]===slug(r.state))||[0,str(r.state)||"Queued"])[1])),
+      el("td",{},link(str(r.title),r.url),el("span",{class:"sub"},[str(r.source),r.sev?"sev "+str(r.sev):""].filter(Boolean).join(" · "))),
+      el("td",{},el("span",{class:"mono"},str(r.repo)),el("span",{class:"sub"},str(r.surface))),
+      el("td",{class:"mono"},[str(r.size),str(r.model)].filter(Boolean).join(" · ")),
+      el("td",{},pr,r.branch?el("span",{class:"sub mono"},str(r.branch)):null),
+      el("td",{class:"mono"},str(r.session)),
+      el("td",{},str(r.note),r.updatedAt?el("span",{class:"sub"},ago(str(r.updatedAt))):null)));
+  }
+  t.append(tb); box.append(el("div",{class:"tablewrap"},t));
+}
+function renderSessions(){
+  const box=$("sessions"); box.textContent="";
+  if(!sessions.length){box.append(el("span",{class:"sub"},"No sessions or agents yet."));return}
+  for(const s of sessions){
+    box.append(el("div",{class:"srow"},
+      el("div",{},el("b",{class:"mono"},str(s.name)),el("span",{class:"sub"},[str(s.kind),str(s.surface),str(s.model)].filter(Boolean).join(" · ")),
+        s.title?el("span",{class:"sub"},str(s.title)):null, s.branch?el("span",{class:"sub mono"},str(s.branch)):null),
+      pill(s.state||"idle")));
+  }
+}
+function renderHouse(){
+  const kv=$("house"); kv.textContent=""; const h=dayDoc?.housekeeping;
+  if(!h||typeof h!=="object"){kv.append(el("dt",{},"State"),el("dd",{},"Not run yet"));return}
+  for(const[k,v]of Object.entries(h)){kv.append(el("dt",{},k),el("dd",{},typeof v==="object"?JSON.stringify(v):str(v)))}
+}
+function renderReport(){const r=str(dayDoc?.report);$("report-card").hidden=!r;$("report").textContent=r}
+function renderAll(){renderDays();renderHeader();renderCounts();renderNeeds();renderPlan();renderSessions();renderHouse();renderReport()}
+
+function watchDay(day){
+  unsubs.forEach(u=>u()); unsubs=[]; selected=day; dayDoc=null; rows=[]; sessions=[]; renderAll();
+  if(!db||!day)return;
+  clearTimeout(timer); timer=setTimeout(()=>showBanner("The data cannot be reached yet. What shows may be out of date.",true),10000);
+  const done=s=>{if(!s.metadata.fromCache){clearTimeout(timer);showBanner("")}};
+  const fail=()=>{clearTimeout(timer);showBanner("The live connection stopped. Open the page again to reconnect.",true)};
+  unsubs.push(db.doc("days/"+day).onSnapshot(s=>{done(s);dayDoc=s.exists?s.data():null;renderAll()},fail));
+  unsubs.push(db.collection("days/"+day+"/rows").orderBy("n").onSnapshot(s=>{done(s);rows=s.docs.map(d=>d.data());renderAll()},fail));
+  unsubs.push(db.collection("days/"+day+"/sessions").onSnapshot(s=>{done(s);sessions=s.docs.map(d=>d.data());renderAll()},fail));
+}
+
+$("day").addEventListener("change",e=>{const d=e.target.value;try{history.replaceState(null,"","#d"+d.replace(/-/g,""))}catch(_){} watchDay(d)});
+renderAll();
+
+(async()=>{
+  const c=window.claude; db=c&&c.use?await c.use("db"):null;
+  if(!db){showBanner("Live data is not available in this view. Sign in to claude.ai and open the page again.",true);return}
+  let first=true;
+  db.collection("days").orderBy("date","desc").limit(30).onSnapshot(s=>{
+    days=s.docs.map(d=>str(d.data().date)||d.id);
+    const want=(location.hash.match(/^#d(\d{8})$/)||[])[1];
+    const fromHash=want?days.find(d=>d.replace(/-/g,"")===want):null;
+    if(first||!days.includes(selected)){first=false;watchDay(fromHash||days[0]||null)}else renderDays();
+  },()=>showBanner("The list of days cannot be read.",true));
+})();
+</script>

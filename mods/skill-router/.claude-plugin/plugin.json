@@ -1,0 +1,11 @@
+{
+  "name": "skill-router",
+  "version": "0.1.0",
+  "description": "Adds one context line that names the best matching personal skill for a typed prompt, found by trigger phrases or one small-model classify call.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.287"
+  }
+}

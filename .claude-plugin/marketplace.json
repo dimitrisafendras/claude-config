@@ -1,0 +1,96 @@
+{
+  "name": "claude-config",
+  "owner": {
+    "name": "claude-config"
+  },
+  "metadata": {
+    "description": "Functional mods for Claude Code: model routing, CI watch, guards and status."
+  },
+  "plugins": [
+    {
+      "name": "automodel",
+      "source": "./mods/automodel",
+      "description": "Picks the model and effort per turn (and the model per subagent) from a quick classification of the prompt, with a guard that keeps the prompt cache."
+    },
+    {
+      "name": "browser-keeper",
+      "source": "./mods/browser-keeper",
+      "description": "Adds one repair hint to failed browser tool results, warns once when a page needs a sign-in, and stops retry loops."
+    },
+    {
+      "name": "cheatsheet",
+      "source": "./mods/cheatsheet",
+      "description": "Adds /cheat: a list of your skills built from the live skill files, with a link to the skills cheat sheet artifact. Shows a one-line hint at session start."
+    },
+    {
+      "name": "verify-gate",
+      "source": "./mods/verify-gate",
+      "description": "A session may not finish while its check command fails. After a turn that edited files it runs the check; a failure starts another turn with the output, at most 3 tries. Inert until a check is set (tool mcp__verify-gate__set, /verify-gate set, or .claude/verify.sh once the person approves it with /verify-gate set file)."
+    },
+    {
+      "name": "ci-watch",
+      "source": "./mods/ci-watch",
+      "description": "Watches the CI of your pull requests and starts a turn when a PR turns red, conflicts or is green to merge, so no agent sleep-polls CI. The option fix_turns=off keeps the notifications and starts no turn for red CI and conflicts. Other mods and the model add a PR through the tool mcp__ci-watch__watch."
+    },
+    {
+      "name": "connect-doctor",
+      "source": "./mods/connect-doctor",
+      "description": "Checks MCP servers and gh auth at session start, connects held servers once, and says only what needs a sign-in. /doctor runs the check now."
+    },
+    {
+      "name": "context-keeper",
+      "source": "./mods/context-keeper",
+      "description": "Keeps a small task-state record (repo, branch, worktree, PRs, plan, the person's decisions) and carries it through compaction."
+    },
+    {
+      "name": "fail-hints",
+      "source": "./mods/fail-hints",
+      "description": "Adds one short repair hint to a failed tool result when the error text matches a known pattern."
+    },
+    {
+      "name": "memory-governor",
+      "source": "./mods/memory-governor",
+      "description": "Reads ~/.claude/mem-budget.sh every minute, shows free memory, and refuses new agents and heavy Bash jobs while there is no room."
+    },
+    {
+      "name": "merge-policy",
+      "source": "./mods/merge-policy",
+      "description": "Answers permission checks for `gh pr merge` commands from a rule file (~/.claude/merge-policy.json): allows a single merge only when the PR is open, not a draft, mergeable, green and the flags match the rule; denies with a clear reason when a condition fails; makes a person approve every other merge, so auto mode cannot approve one alone; passes every other command through. Inert without the rule file."
+    },
+    {
+      "name": "ops-board",
+      "source": "./mods/ops-board",
+      "description": "One answer to 'status?': a pane, /status and a status line with agents, background tasks and your open PRs with CI verdicts."
+    },
+    {
+      "name": "repo-guard",
+      "source": "./mods/repo-guard",
+      "description": "Warns when the edited repo's branch is far behind the default branch or the main checkout has local changes; refuses git commit on the default branch and pushes of agent-branded branches where the repo forbids them."
+    },
+    {
+      "name": "session-relay",
+      "source": "./mods/session-relay",
+      "description": "Alerts the person when a message to another session was not delivered or a hook call timed out, and tells the model."
+    },
+    {
+      "name": "ship",
+      "source": "./mods/ship",
+      "description": "/ship and the tool mcp__ship__ship commit the local diff with a generated message, push the branch, open or find its pull request (with the given title and body, or generated) and hand it to ci-watch. Never merges."
+    },
+    {
+      "name": "skill-router",
+      "source": "./mods/skill-router",
+      "description": "Adds one context line that names the best matching personal skill for a typed prompt, found by trigger phrases or one small-model classify call."
+    },
+    {
+      "name": "flow-view",
+      "source": "./mods/flow-view",
+      "description": "A dashboard pane for the work day: the phases and counts of the /start-work plan, the tickets and the sessions as short lists, and a press on a row opens its drawing (ticket breakdown, or steps and run graph of a session). /flow opens it; /flow demo plays a sample day."
+    },
+    {
+      "name": "custom-themes",
+      "source": "./mods/custom-themes",
+      "description": "The custom themes of this setup on one card: /themes picks Christmas Night (snowy trees with lights, a snow ground that follows the context window) or Pixel Blue (a pixel night sky with Orion, more stars as the context fills). Apply for the project or this session, preview, or no theme."
+    }
+  ]
+}

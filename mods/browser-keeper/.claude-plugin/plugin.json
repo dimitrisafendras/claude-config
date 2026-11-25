@@ -1,0 +1,11 @@
+{
+  "name": "browser-keeper",
+  "version": "0.1.0",
+  "description": "Adds one repair hint to failed browser tool results, warns once when a page needs a sign-in, and stops retry loops.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.295"
+  }
+}

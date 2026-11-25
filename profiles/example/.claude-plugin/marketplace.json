@@ -1,0 +1,6 @@
+{
+  "name": "claude-config-example",
+  "owner": { "name": "example" },
+  "metadata": { "description": "Mods of the example profile. Add a folder under mods/ and list it here." },
+  "plugins": []
+}

@@ -1,0 +1,11 @@
+{
+  "name": "fail-hints",
+  "version": "0.1.0",
+  "description": "Adds one short repair hint to a failed tool result when the error text matches a known pattern.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.287"
+  }
+}

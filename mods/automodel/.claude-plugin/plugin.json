@@ -1,0 +1,11 @@
+{
+  "name": "automodel",
+  "version": "0.1.1",
+  "description": "Picks the model and effort per turn (and the model per subagent) from a quick classification of the prompt, with a guard that keeps the prompt cache.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.309"
+  }
+}

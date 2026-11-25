@@ -1,0 +1,40 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"$HOME/.claude/statusline-command.sh\""
+  },
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": false,
+    "context7@claude-plugins-official": false,
+    "code-review@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "github@claude-plugins-official": false,
+    "playwright@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "figma@claude-plugins-official": false,
+    "claude-code-setup@claude-plugins-official": true,
+    "supabase@claude-plugins-official": true,
+    "vercel@claude-plugins-official": false,
+    "clangd-lsp@claude-plugins-official": false,
+    "cc-plugin-you-should-know@builtin": false,
+    "typescript-lsp@claude-plugins-official": true
+  },
+  "outputStyle": "ASD-STE100",
+  "effortLevel": "medium",
+  "autoCompactWindow": 600000,
+  "tui": "fullscreen",
+  "skipWorkflowUsageWarning": true,
+  "theme": "auto",
+  "editorMode": "normal",
+  "agentPushNotifEnabled": true,
+  "permissions": {
+    "allow": [
+      "mcp__ccd_session_mgmt__archive_session"
+    ]
+  },
+  "model": "claude-opus-5-5"
+}

@@ -1,0 +1,262 @@
+<meta charset="utf-8">
+<title>Claude Releases Digest</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a release ledger. A sticky month index on the left, one row per release on the right:
+   date and version in a fixed mono column, then the name, what it does and why it helps here. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1a1e24;
+  --muted: #5a6472;
+  --line: #dfe3e9;
+  --accent: #2c55c9;
+  --accent-soft: #e8eefc;
+  --why: #f1f4f9;
+  --font-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --surface: #171b21; --fg: #e5e8ed; --muted: #98a1ae; --line: #2a3039;
+    --accent: #8ea9ff; --accent-soft: #1e2740; --why: #1b2029; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --surface: #171b21; --fg: #e5e8ed; --muted: #98a1ae; --line: #2a3039;
+  --accent: #8ea9ff; --accent-soft: #1e2740; --why: #1b2029; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 40px 64px; }
+header { display: grid; gap: 14px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(28px, 4vw, 40px); line-height: 1.1; margin: 0; text-wrap: balance; }
+.intro { max-width: 68ch; color: var(--muted); display: grid; gap: 8px; }
+.intro p { margin: 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--fg); font-weight: 500; }
+.stats span { color: var(--muted); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { font: inherit; font-weight: 500; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 14px; margin-bottom: -1px; cursor: pointer; }
+.tab:hover { color: var(--fg); }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tab .n { font-family: var(--font-mono); font-size: 12px; margin-left: 6px; color: var(--muted); }
+.controls { display: grid; gap: 10px; }
+#q { width: 100%; max-width: 420px; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); padding: 3px 9px; border-radius: 999px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.chip .n { opacity: 0.7; margin-left: 4px; }
+.layout { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 40px; margin-top: 28px; }
+nav.months { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; display: grid; gap: 2px; }
+nav.months a { display: flex; justify-content: space-between; gap: 8px; text-decoration: none; color: var(--muted); padding: 5px 8px; border-radius: 6px; font-size: 14px; }
+nav.months a:hover { background: var(--surface); color: var(--fg); }
+nav.months a .n { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+nav.months a.empty { opacity: 0.4; }
+section.month { display: grid; gap: 0; margin-bottom: 36px; scroll-margin-top: 16px; }
+section.month h2 { font-family: var(--font-display); font-weight: 700; font-size: 22px; margin: 0 0 6px; display: flex; align-items: baseline; gap: 10px; }
+section.month h2 .n { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+.note { color: var(--muted); margin: 0 0 8px; max-width: 68ch; }
+article.item { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-top: 1px solid var(--line); }
+.meta { display: grid; gap: 4px; align-content: start; font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.meta .date { color: var(--fg); font-size: 13px; }
+.meta .ver { overflow-wrap: anywhere; }
+.body { display: grid; gap: 8px; min-width: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+h3 { font-family: var(--font-display); font-weight: 500; font-size: 17px; line-height: 1.3; margin: 0; text-wrap: balance; }
+.area { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.body p { margin: 0; max-width: 70ch; }
+.why { background: var(--why); border-radius: 6px; padding: 8px 12px; max-width: 70ch; }
+.why b { font-weight: 600; }
+.src { font-size: 13px; }
+.empty-state, .error { color: var(--muted); padding: 24px 0; }
+@media (max-width: 760px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  nav.months { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  nav.months a { white-space: nowrap; background: var(--surface); }
+  article.item { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .meta { grid-auto-flow: column; justify-content: start; gap: 12px; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Claude Code and the Claude platform</div>
+    <h1 id="title">Claude Releases Digest</h1>
+    <div class="intro" id="intro"><p>The big new features that Anthropic released for Claude, and the changes that affect the daily workflow.</p></div>
+    <div class="stats" id="stats"></div>
+    <div class="tabs" id="tabs" role="tablist" aria-label="Sections">
+      <button type="button" class="tab" role="tab" data-tab="releases" aria-selected="true">Releases<span class="n"></span></button>
+      <button type="button" class="tab" role="tab" data-tab="improvements" aria-selected="false">Improvements<span class="n"></span></button>
+      <button type="button" class="tab" role="tab" data-tab="proposals" aria-selected="false">Proposals<span class="n"></span></button>
+    </div>
+    <div class="controls">
+      <label class="eyebrow" for="q">Filter</label>
+      <input id="q" type="search" placeholder="Search names, versions, text" autocomplete="off">
+      <div class="chips" id="chips" role="group" aria-label="Areas"></div>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="months" id="months" aria-label="Months"></nav>
+    <main id="list"><p class="empty-state">Loading the digest.</p></main>
+  </div>
+</div>
+
+<script>
+(function () {
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  function inline(s) {
+    const codes = [];
+    s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
+    s = esc(s);
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => '<a href="' + u + '" target="_blank" rel="noopener">' + t + "</a>");
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + esc(codes[+i]) + "</code>");
+    return s;
+  }
+  // Parse the digest format: # title, intro paragraphs and "Key: value" lines, ## month, ### item,
+  // then a "date · version · area" line, paragraphs, a "**Why here:**" paragraph and a "[Source](url)" line.
+  function parse(md) {
+    const doc = { title: "", intro: [], facts: {}, months: [] };
+    let month = null, item = null, para = [];
+    const flush = () => {
+      if (!para.length) return;
+      const text = para.join(" ").trim(); para = [];
+      if (item) {
+        if (!item.metaDone) { item.metaDone = true; const p = text.split(" · ").map(x => x.trim());
+          item.date = p[0]; item.area = p.length > 1 ? p[p.length - 1] : ""; item.ver = p.length > 2 ? p.slice(1, -1).join(", ") : ""; return; }
+        const src = text.match(/^\[Source\]\((https?:\/\/[^)\s]+)\)$/);
+        if (src) { item.src = src[1]; return; }
+        if (/^\*\*Why here:\*\*/.test(text)) { item.why = text.replace(/^\*\*Why here:\*\*\s*/, ""); return; }
+        item.desc.push(text);
+      } else if (month) { month.note.push(text); }
+      else {
+        const lines = text.split(/(?=\b(?:Covered to|Covered from|Last update):)/);
+        let rest = [];
+        lines.forEach(l => { const m = l.match(/^(Covered to|Covered from|Last update):\s*(.*)$/); if (m) doc.facts[m[1]] = m[2].trim(); else rest.push(l); });
+        if (rest.join("").trim()) doc.intro.push(rest.join(" ").trim());
+      }
+    };
+    md.split(/\r?\n/).forEach(line => {
+      if (/^# /.test(line)) { flush(); doc.title = line.slice(2).trim(); return; }
+      if (/^## /.test(line)) { flush(); item = null; month = { name: line.slice(3).trim(), note: [], items: [] }; doc.months.push(month); return; }
+      if (/^### /.test(line)) { flush(); item = { title: line.slice(4).trim(), desc: [], why: "", src: "", metaDone: false }; month && month.items.push(item); return; }
+      if (!line.trim()) { flush(); return; }
+      if (item && !item.metaDone) { para.push(line); flush(); return; }
+      para.push(line);
+    });
+    flush();
+    return doc;
+  }
+  window.__parseDigest = parse;
+
+  const state = { q: "", areas: new Set() };
+  // Three Markdown files with one format. The Releases file also holds the intro of the page.
+  const TABS = {
+    releases: { file: "claude-releases.md", none: "The digest file is empty." },
+    improvements: { file: "claude-releases-improvements.md", none: "No improvements are written yet." },
+    proposals: { file: "claude-releases-proposals.md", none: "No proposals are written yet. The weekly run adds them." }
+  };
+  const docs = {};
+  let tab = "releases";
+  let doc = null;
+  const total = d => d.months.reduce((a, m) => a + m.items.length, 0);
+  const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const matches = it => {
+    if (state.areas.size && !state.areas.has(it.area)) return false;
+    if (!state.q) return true;
+    const hay = [it.title, it.date, it.ver, it.area, it.desc.join(" "), it.why].join(" ").toLowerCase();
+    return state.q.split(/\s+/).every(w => hay.includes(w));
+  };
+  function render() {
+    const list = document.getElementById("list"), nav = document.getElementById("months");
+    let html = "", navHtml = "", shown = 0;
+    doc.months.forEach(m => {
+      const items = m.items.filter(matches); shown += items.length;
+      const id = "m-" + slug(m.name);
+      navHtml += '<a href="#' + id + '"' + (items.length ? "" : ' class="empty"') + "><span>" + esc(m.name.replace(/\s*\(.*\)$/, "")) + '</span><span class="n">' + items.length + "</span></a>";
+      if (!items.length) return;
+      html += '<section class="month" id="' + id + '"><h2>' + esc(m.name) + '<span class="n">' + items.length + " items</span></h2>";
+      m.note.forEach(n => { html += '<p class="note">' + inline(n) + "</p>"; });
+      items.forEach(it => {
+        html += '<article class="item"><div class="meta"><span class="date">' + esc(it.date) + "</span>" +
+          (it.ver ? '<span class="ver">' + esc(it.ver) + "</span>" : "") + '</div><div class="body"><div class="head"><h3>' +
+          inline(it.title) + '</h3><span class="area">' + esc(it.area) + "</span></div>" +
+          it.desc.map(d => "<p>" + inline(d) + "</p>").join("") +
+          (it.why ? '<p class="why"><b>Why here:</b> ' + inline(it.why) + "</p>" : "") +
+          (it.src ? '<p class="src"><a href="' + esc(it.src) + '" target="_blank" rel="noopener">Source: ' + esc(it.src.replace(/^https?:\/\//, "")) + "</a></p>" : "") +
+          "</div></article>";
+      });
+      html += "</section>";
+    });
+    list.innerHTML = html || '<p class="empty-state">' + (total(doc) === 0 ? esc(TABS[tab].none) : "No items match this filter. Clear the search or the area chips.") + "</p>";
+    nav.innerHTML = navHtml;
+    const all = total(doc);
+    document.getElementById("stats").innerHTML =
+      (doc.facts["Covered to"] ? "<span>Covered <b>" + esc(doc.facts["Covered from"] || "?") + "</b> to <b>" + esc(doc.facts["Covered to"]) + "</b></span>" : "") +
+      "<span><b>" + (shown === all ? all : shown + " of " + all) + "</b> items</span>" +
+      (doc.facts["Last update"] ? "<span>Last update <b>" + esc(doc.facts["Last update"]) + "</b></span>" : "");
+    document.querySelectorAll(".tab").forEach(b => {
+      const d = docs[b.dataset.tab];
+      b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false");
+      b.querySelector(".n").textContent = d ? total(d) : "";
+    });
+  }
+  function renderChips() {
+    const counts = {};
+    doc.months.forEach(m => m.items.forEach(it => { counts[it.area] = (counts[it.area] || 0) + 1; }));
+    const el = document.getElementById("chips");
+    el.innerHTML = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).map(a =>
+      '<button type="button" class="chip" aria-pressed="false" data-area="' + esc(a) + '">' + esc(a) + '<span class="n">' + counts[a] + "</span></button>").join("");
+    el.onclick = e => {
+      const b = e.target.closest(".chip"); if (!b) return;
+      const a = b.dataset.area;
+      if (state.areas.has(a)) state.areas.delete(a); else state.areas.add(a);
+      b.setAttribute("aria-pressed", state.areas.has(a) ? "true" : "false");
+      render();
+    };
+  }
+  if (typeof document === "undefined") return;
+  document.getElementById("q").addEventListener("input", e => { state.q = e.target.value.trim().toLowerCase(); render(); });
+  const EMPTY = { title: "", intro: [], facts: {}, months: [] };
+  const intro = () => {
+    if (docs.releases && docs.releases.title) document.getElementById("title").textContent = docs.releases.title.replace(/^Claude releases digest$/i, "Claude Releases Digest");
+    const d = doc && doc.intro.length ? doc : docs.releases;
+    if (d && d.intro.length) document.getElementById("intro").innerHTML = d.intro.map(p => "<p>" + inline(p) + "</p>").join("");
+  };
+  function show(name) {
+    tab = name; doc = docs[name] || EMPTY;
+    state.areas.clear(); state.q = ""; document.getElementById("q").value = "";
+    intro(); renderChips(); render();
+  }
+  function load(name) {
+    return fetch(TABS[name].file, { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(md => { docs[name] = parse(md); }, err => { docs[name] = { title: "", intro: [], facts: {}, months: [], failed: String(err.message || err) }; });
+  }
+  document.getElementById("tabs").addEventListener("click", e => {
+    const b = e.target.closest(".tab"); if (b) show(b.dataset.tab);
+  });
+  Promise.all(Object.keys(TABS).map(load)).then(() => {
+    const first = docs.releases;
+    if (first.failed) {
+      document.getElementById("list").innerHTML = '<p class="error">The digest file did not load (' + esc(first.failed) +
+        "). The same text is in <code>docs/claude-releases.md</code> in the claude-config repository.</p>";
+      return;
+    }
+    show("releases");
+  });
+})();
+</script>

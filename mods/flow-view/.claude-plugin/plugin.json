@@ -1,0 +1,12 @@
+{
+  "name": "flow-view",
+  "version": "0.2.1",
+  "description": "A dashboard pane for the work day: the /start-work tickets and your sessions as short lists that open on a press",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.299"
+  },
+  "types": "./types/index.d.ts"
+}

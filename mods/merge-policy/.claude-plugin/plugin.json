@@ -1,0 +1,11 @@
+{
+  "name": "merge-policy",
+  "version": "0.2.0",
+  "description": "Answers permission checks for `gh pr merge` commands from a rule file (~/.claude/merge-policy.json): allows a single merge only when the PR is open, not a draft, mergeable, green and the flags match the rule; denies with a clear reason when a condition fails; makes a person approve every other merge, so auto mode cannot approve one alone; passes every other command through. Inert without the rule file.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.304"
+  }
+}

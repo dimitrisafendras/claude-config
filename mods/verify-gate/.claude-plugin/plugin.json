@@ -1,0 +1,11 @@
+{
+  "name": "verify-gate",
+  "version": "0.1.0",
+  "description": "A lane or session may not finish while its check command fails. After a turn that edited files, it runs the check, and a failing check starts another turn with the output. At most 3 tries. Inert until a check is set.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.295"
+  }
+}

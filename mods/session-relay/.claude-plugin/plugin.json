@@ -1,0 +1,11 @@
+{
+  "name": "session-relay",
+  "version": "0.1.0",
+  "description": "Alerts the person when a message to another session was not delivered or a hook call timed out, and tells the model.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.295"
+  }
+}

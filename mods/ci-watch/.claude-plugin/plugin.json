@@ -1,0 +1,23 @@
+{
+  "name": "ci-watch",
+  "version": "0.2.1",
+  "description": "Watches the CI of your pull requests and starts a turn when a PR turns red, conflicts or is green to merge, so no agent sleep-polls CI. The option fix_turns=off keeps the notifications and starts no turn for red CI and conflicts. Other mods and the model add a PR through the tool mcp__ci-watch__watch.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.295"
+  },
+  "userConfig": {
+    "fix_turns": {
+      "type": "string",
+      "title": "Fix turns",
+      "description": "on: a red or conflicted PR starts a turn that fixes it. off: it only gets a toast and a notification; use off when another watcher (the desktop app Auto-fix) does the fix. The green path is the same for the two values.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "repos": {
+    "acme/web-app": {
+      "method": ["merge", "squash"],
+      "admin": false,
+      "requireApproval": false
+    }
+  },
+  "requireGreen": true,
+  "allowAdmin": false
+}

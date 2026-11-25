@@ -1,0 +1,12 @@
+{
+  "name": "connect-doctor",
+  "version": "0.1.0",
+  "description": "Checks MCP servers and gh auth at session start, connects held servers once, and says only what needs a sign-in. /doctor runs the check now.",
+  "author": {
+    "name": "claude-config"
+  },
+  "engines": {
+    "claude-code": ">=2.1.295"
+  },
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,2 @@
+# Path substrings of worktrees cleanup never removes, one per line.
+nx-ci-dashboard-metrics   # used by ~/.claude/nx-ci-dashboard/refresh.mjs

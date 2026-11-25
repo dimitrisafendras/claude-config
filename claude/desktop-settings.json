@@ -1,0 +1,20 @@
+{
+  "_note": "Snapshot of the Claude desktop app Code tab preferences (2026-11-21). The app keeps them, not this repo: install.sh does not apply this file. To restore, ask Claude to read it and apply each key with the app's set_setting tool; the app asks you to approve each change. A key that is missing here was at its default. Never put a secret in this file.",
+  "settings": {
+    "auto_archive_on_pr_close": true,
+    "auto_archive_inactive_days": 7,
+    "branch_prefix": "claude",
+    "connect_new_sessions_to_remote_control": true,
+    "output_style": "ASD-STE100",
+    "draw_attention_on_notifications": true,
+    "notification_sound": "system",
+    "keep_awake_while_working": true,
+    "keep_awake_on_battery": true,
+    "prompt_suggestions": true
+  },
+  "read_only_facts": {
+    "worktree_location": "inside the project (<repo>/.claude/worktrees)",
+    "default_model": "claude-opus-5-5 (in claude/settings.json)",
+    "output_style_note": "ASD-STE100 is a custom style in claude/output-styles; the app tool cannot set a custom style, choose it in Settings, Claude Code."
+  }
+}
