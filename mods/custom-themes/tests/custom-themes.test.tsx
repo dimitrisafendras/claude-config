@@ -140,6 +140,24 @@ test('the fill follows the compaction window when the breakdown has it', async (
   await ui.unmount()
 })
 
+test('Pokémon Pixel shows the context as HP and more creatures as the window fills', async ($, on) => {
+  world(on)
+  await $.session.start(START)
+  expect(await cmd($, 'pokemon-pixel session')).toContain('Pokémon Pixel is set.')
+  const ui = await $.ui.mount({ ...backdrop('pokemon-pixel'), surface: 'desktop' })
+  const low = await drawn(ui)
+  expect(low).toContain('100/100')
+  expect(low).toContain('id="wild-ember"')
+  expect(low).not.toContain('id="wild-splash"')
+  percent = 85
+  await $.turn.start({ text: 'Fill the window', turnId: 't1' })
+  const high = await drawn(ui)
+  expect(high).toContain('15/100')
+  expect(high).toContain('id="wild-splash"')
+  expect(high).toContain('id="wild-sprout"')
+  await ui.unmount()
+})
+
 test('the fill is also read on the timer, so /clear lowers the snow', async ($, on) => {
   const clock = world(on)
   await $.session.start(START)

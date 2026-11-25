@@ -5,6 +5,8 @@ import type { ThemeSetArgs } from 'claude-code'
 import { LOOK as CHRISTMAS_LOOK, PROBLEMS as CHRISTMAS_PROBLEMS } from './christmas-night-look'
 import { SCENE as CHRISTMAS_SCENE, flakeCount, sceneOf as christmasScene } from './christmas-night-scene'
 import { SCENE as PIXEL_SCENE, skyOf, starCount } from './pixel-blue-art'
+import { SCENE as POKEMON_SCENE, altOf as pokemonAlt, sceneOf as pokemonScene } from './pokemon-art'
+import { LOOK as POKEMON_LOOK, PROBLEMS as POKEMON_PROBLEMS } from './pokemon-look'
 import { LOOK as PIXEL_LOOK, PROBLEMS as PIXEL_PROBLEMS } from './pixel-blue-look'
 
 export type Theme = {
@@ -44,6 +46,16 @@ export const THEMES: readonly Theme[] = [
     scene: skyOf,
     alt: percent => `A night sky of ${starCount(percent)} pixel stars with the Orion constellation`,
     problems: PIXEL_PROBLEMS,
+  },
+  {
+    id: POKEMON_SCENE,
+    title: 'Pokémon Pixel',
+    blurb: 'A sunny route of a handheld monster game in original pixel art: round trees, tall grass, a small town and a pond. A battle box shows the context as HP, and wild creatures come out of the grass as it fills.',
+    window: 'dark',
+    look: POKEMON_LOOK,
+    scene: pokemonScene,
+    alt: pokemonAlt,
+    problems: POKEMON_PROBLEMS,
   },
 ]
 
