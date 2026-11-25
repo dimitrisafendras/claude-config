@@ -21,7 +21,7 @@ while [ "$tries" -lt 120 ]; do
   out=$(gh pr checks "$PR" -R "$R" 2>/dev/null)
   pending=$(echo "$out" | awk -F'\t' '$2=="pending"' | wc -l | tr -d ' ')
   if [ "$pending" = 0 ] && [ -n "$out" ]; then
-    fails=$(echo "$out" | awk -F'\t' '$2=="fail"{print $1}')
+    fails=$(echo "$out" | awk -F'\t' '$2=="fail" || $2=="cancel"{print $1}')
     if [ -z "$fails" ]; then
       gh pr merge "$PR" -R "$R" "--$M" >/dev/null && echo "$PR merged ($M)" && exit 0
       echo "$PR merge call failed"; exit 3

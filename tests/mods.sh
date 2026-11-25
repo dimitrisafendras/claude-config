@@ -15,17 +15,8 @@ MIN=2.1.323
 # ship: `/ship` is also a command of Claude Code itself, and validate warns about the name.
 NOT_STRICT=" ship "
 
-newest_claude() {
-  local c v best="" bestv=""
-  for c in "${CLAUDE_BIN:-}" "$(command -v claude 2>/dev/null)" "$HOME"/Library/Application\ Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude; do
-    [ -n "$c" ] && [ -x "$c" ] || continue
-    v=$("$c" --version 2>/dev/null | awk '{print $1; exit}')
-    [ -n "$v" ] || continue
-    if [ -z "$bestv" ] || [ "$(printf '%s\n%s\n' "$bestv" "$v" | sort -V | tail -1)" = "$v" ]; then best=$c; bestv=$v; fi
-  done
-  [ -n "$best" ] && printf '%s\t%s\n' "$best" "$bestv"
-}
-
+# shellcheck source=/dev/null  # newest_claude, shared with the setup-audit skill
+. "$ROOT/claude/skills/setup-audit/newest-claude.sh"
 pick=$(newest_claude)
 if [ -z "$pick" ]; then echo "FAIL: no claude CLI found (install Claude Code or set CLAUDE_BIN)"; exit 1; fi
 CLAUDE=${pick%%$'\t'*}; VERSION=${pick##*$'\t'}

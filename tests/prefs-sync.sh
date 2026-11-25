@@ -9,7 +9,7 @@ mkdir -p "$R/claude" "$R/profiles/acme" "$H"
 git -C "$R" init -q -b main
 echo '{"theme":"auto","effortLevel":"low","enabledPlugins":{"a@official":true}}' > "$R/claude/settings.json"
 echo '{"permissions":{"allow":["Bash(old)"]}}' > "$R/profiles/acme/settings.json"
-git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@t commit -q -m init
+git -C "$R" -c core.autocrlf=false add -A &&git -C "$R" -c user.name=t -c user.email=t@t commit -q -m init
 git -C "$R" worktree add -q "$T/wt" -b prefs
 echo acme > "$H/claude-config.profile"
 cat > "$H/settings.json" <<'JSON'
@@ -25,9 +25,23 @@ chk() { [ "$2" = "$3" ] || { echo "FAIL: $1: got '$2' expected '$3'"; fail=1; };
 export CLAUDE_HOME="$H"
 bash "$S" --check --repo "$T/wt" >/dev/null; chk "check finds a difference" "$?" "1"
 bash "$S" --apply --repo "$R" >/dev/null 2>&1; chk "refuses the main checkout" "$?" "2"
-# run through a link, as install.sh makes it: the repo is found from the link target, with no --repo
-mkdir -p "$T/linkhome" && ln -s "$S" "$T/linkhome/prefs-sync.sh"
-bash "$T/linkhome/prefs-sync.sh" --check >/dev/null 2>&1; chk "check through a link finds the repo" "$?" "1"
+# run through a link, as install.sh makes it: the repo is found from the link target, with no --repo.
+# Git Bash copies on "ln -s" unless it is told to make native Windows links (install.sh does the same).
+case "$(uname -s)" in
+  MINGW*|MSYS*) export MSYS="${MSYS:+$MSYS }winsymlinks:nativestrict";;
+  CYGWIN*) export CYGWIN="${CYGWIN:+$CYGWIN }winsymlinks:nativestrict";;
+esac
+mkdir -p "$T/linkhome"
+if ln -s "$S" "$T/linkhome/prefs-sync.sh" 2>/dev/null && [ -L "$T/linkhome/prefs-sync.sh" ]; then
+  bash "$T/linkhome/prefs-sync.sh" --check >/dev/null 2>&1; chk "check through a link finds the repo" "$?" "1"
+else
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if [ -n "${CI:-}" ]; then echo "FAIL: no symbolic links here, and CI is set"; fail=1
+      else echo "skipped: no symbolic links here (check through a link)"; fi;;
+    *) echo "FAIL: cannot make a symbolic link in $T"; fail=1;;
+  esac
+fi
 bash "$S" --apply --repo "$T/wt" >/dev/null 2>&1; chk "apply works" "$?" "0"
 C="$T/wt/claude/settings.json"; P="$T/wt/profiles/acme/settings.json"
 chk "theme copied"        "$(jq -r .theme "$C")" "dark"

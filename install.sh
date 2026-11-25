@@ -16,6 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 S="$HERE/claude/settings.json"
 C="$HERE/claude"; D="$HOME/.claude"; L="$D/settings.json"
 RECORD="$D/claude-config.profile"
+REPO_RECORD="$D/claude-config.repo"  # the main checkout, one line: /start-work and others find the repo here
 # jq.exe on Windows writes CRLF. A CR at the end of a value breaks names ("plugin@market\r" is not found).
 jq() { command jq "$@" | tr -d '\r'; }
 
@@ -112,6 +113,8 @@ if [ "$MODE" = check ]; then
     case "$(readlink "$l")" in "$HERE"/*|"${PR:-/nonexistent}"/*) echo "$want" | grep -qxF "$l" || say "link: $l is not wanted (target ${l:+$(readlink "$l")})";; esac
   done
   [ "$PROFILE" = "$( [ -f "$RECORD" ] && cat "$RECORD" || true )" ] || say "profile: recorded '$( [ -f "$RECORD" ] && cat "$RECORD" || true )', repo run with '$PROFILE'"
+  if [ ! -f "$REPO_RECORD" ]; then say "repo: $REPO_RECORD is missing (run install.sh once)"
+  else rec=$(tr -d '\r' < "$REPO_RECORD"); [ "$rec" = "$HERE" ] || say "repo: $REPO_RECORD points to '$rec', not $HERE"; fi
   # The links serve whatever this checkout has, so it must be on main.
   br=$(git -C "$HERE" branch --show-current)
   [ "$br" = "main" ] || say "repo: checkout is on '$br', not main"
@@ -180,8 +183,12 @@ link() {  # link <source> <target>; a real file or folder at <target> is moved i
 }
 while IFS=$'\t' read -r src dst; do link "$src" "$dst"; done < <(links)
 if [ -n "$PR" ]; then
-  for f in projects.conf work-monitor-url cheat-sheet-url cheat-buttons.json; do  # copied, not linked: yours to edit; never overwritten
-    if [ -f "$PR/$f" ] && [ ! -e "$D/$f" ]; then cp "$PR/$f" "$D/$f"; echo "copied $f (yours to edit)"; fi
+  for f in projects.conf work-monitor-url cheat-sheet-url cheat-buttons.json merge-policy.json; do  # copied, not linked: yours to edit; never overwritten
+    if [ -f "$PR/$f" ] && [ ! -e "$D/$f" ] && [ ! -L "$D/$f" ]; then
+      cp "$PR/$f" "$D/$f"
+      if [ "$f" = merge-policy.json ]; then echo "copied $f (it permits gh pr merge with no prompt for the repos in it; yours to edit)"
+      else echo "copied $f (yours to edit)"; fi
+    fi
   done
   echo "$PROFILE" > "$RECORD"
 elif [ -f "$RECORD" ] || [ "$PROFILE" = "" ]; then
@@ -192,7 +199,8 @@ for l in "$D"/skills/* "$D"/start-work.d/*; do
   [ -L "$l" ] || continue
   case "$(readlink "$l")" in "$HERE"/*|"${PR:-/nonexistent}"/*) echo "$want" | grep -qxF "$l" || { rm "$l"; echo "removed link $l"; };; esac
 done
-echo "linked CLAUDE.md, ASD-STE100 output style, skills, pr-reviewer, scripts${PROFILE:+, profile $PROFILE}"
+echo "$HERE" > "$REPO_RECORD"
+echo "linked CLAUDE.md, ASD-STE100 output style, skills, pr-reviewer, scripts${PROFILE:+, profile $PROFILE}; recorded the repo in $REPO_RECORD"
 
 echo
 echo "Done. Restart Claude Code. Then run ./install.sh --check."
