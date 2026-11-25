@@ -38,7 +38,7 @@ function world(on: On) {
   return clock
 }
 
-type Ui = { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }
+type Ui = { findAll: (q: { type: 'Svg' | 'Link' }) => Promise<{ props: { source?: unknown } }[]> }
 
 // Every drawing on the screen, as one text.
 async function drawn(ui: Ui): Promise<string> {
@@ -341,5 +341,26 @@ test('a group folds, and a ticket shows its steps, its time and the part of the 
   expect(await ui.find({ type: 'Text', text: /✓ queued {2}→ {2}✓ running {2}→ {2}✓ review {2}→ {2}◉ merged {2}→ {2}○ verified/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Time: 20m 00s · you about 2m 00s \(10%\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Time: not measured/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an active ticket with a link has a link that the browser opens, and a ticket with no link has none', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.tool.call({
+    tool: 'ArtifactData',
+    action: 'batch',
+    url: 'https://claude.ai/artifact/x',
+    writes: [
+      { op: 'set', collection: 'days', doc_id: '2026-11-22', data: { phase: 'running' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r01', data: { n: 1, title: 'With a link', url: 'https://app.example.com/t/abc', state: 'running' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r02', data: { n: 2, title: 'No link', state: 'running' } },
+    ],
+  } as never)
+  await clock.advance(3000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const links = await ui.findAll({ type: 'Link' })
+  expect(links.map(l => l.props.href)).toEqual(['https://app.example.com/t/abc'])
   await ui.unmount()
 })
