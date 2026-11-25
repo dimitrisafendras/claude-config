@@ -36,7 +36,7 @@ A Claude Code setup in two layers, two repos:
 | Cheat sheet | `mods/cheatsheet` | `/cheat` and a button row above the prompt |
 | Routines | `routines/` | Prompts for scheduled tasks: nightly-cleanup, morning-prep, weekly-setup-audit, weekly-claude-releases, prefs-sync, project-daily |
 | Claude releases | `docs/claude-releases.md`, `docs/claude-releases-improvements.md`, `docs/claude-releases-proposals.md`, `routines/weekly-claude-releases.md` | A digest page with three tabs: **Releases** (the big Claude features and workflow changes, by month, newest first), **Improvements** (the updates that were merged to this setup) and **Proposals** (changes that the releases suggest, with the gain and the risk). The weekly routine updates all three, republishes the artifact (URL in `docs/claude-releases-url`) and opens one PR |
-| CI | `.github/workflows/ci.yml`, `tests/` | Shell syntax, shellcheck, JSON, frontmatter, install, audit, project discovery, core-clean |
+| CI | `.github/workflows/ci.yml`, `tests/` | Two jobs run in parallel. `checks` runs on Linux and on Windows: shell syntax, JSON, skill frontmatter, and every `tests/*.sh` except `mods.sh` (shellcheck runs on Linux only). A new test file runs with no change to the workflow. The tests are `install-check`, `audit-link`, `list-projects`, `prefs-sync`, `morning-project`, `core-clean`, `mem-budget`, `merge-when-green` and `inventory`. `inventory` fails when a skill, mod, routine, script or test file is not named here. `mods` runs on Linux: it runs `tests/mods.sh`. A new push cancels the old run of a pull request |
 | Agents | `claude/agents/pr-reviewer.md` | The one custom subagent |
 
 ## The flow of a change
