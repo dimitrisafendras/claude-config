@@ -58,6 +58,7 @@ Person needed: the approval of a mod change. The loops open PRs for the setup; t
 |---|---|---|
 | `morning-prep` | Start the day | routine |
 | `project-daily` | Start the day | routine |
+| `project-morning` | Start the day | routine |
 | `daily-digest` | Start the day | routine |
 | `sweep` | Start the day | routine |
 | lane loop | Do the work | event (`ci-watch`), `/autonomy run lane <ticket>` |

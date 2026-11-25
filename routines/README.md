@@ -28,6 +28,7 @@ Do not set `permissions.denyInsteadOfPrompting` for this. The setting is read on
 | `weekly-setup-audit` | 08:00 every Monday | `setup-audit` | Audits this repo and reports; changes nothing |
 | `weekly-claude-releases` | 08:30 every Monday | `artifact-design` | Adds the big Claude features and workflow changes of the last 7 days to `docs/claude-releases.md`, logs the merged improvements to `docs/claude-releases-improvements.md`, republishes its artifact (three tabs), writes update proposals and upkeep findings (old skills, retired names, old models) to `docs/claude-releases-proposals.md`, and opens one PR on `docs/claude-releases`; never merges |
 | `prefs-sync` | 19:00 every day | `sync-prefs` | Sends changed local preferences to the repo as one PR on `prefs/sync`; never merges |
+| `project-morning` (template) | set per project | `start-work` (stages 1 and 2, one project), the project dispatcher | Prepares the day of one project, then starts its ready tickets up to the memory room |
 | `project-daily` (template) | set per project | `start-work` (stages 1 and 2, one project) | Housekeeping and inbox of one project; writes the day document `<date>_<folder>`; starts no work |
 
 ## One routine per project
@@ -40,6 +41,8 @@ Do not set `permissions.denyInsteadOfPrompting` for this. The setting is read on
 4. In the morning, `/start-work <folder>` uses the prepared day document and goes to the plan.
 
 `morning-prep` does the same for all projects in one run. Use one or the other for a project, not the two.
+
+To make the loop start work too, use `project-morning.md` in step 3 and name the task `morning-<folder>`. Turn off `daily-<folder>` for that project.
 
 ## Kill switch and manual run
 
