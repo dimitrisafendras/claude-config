@@ -64,3 +64,15 @@ export function themeOf(id: string | undefined): Theme | undefined {
   const key = id.trim().toLowerCase()
   return THEMES.find(t => t.id === key || t.title.toLowerCase() === key)
 }
+
+/** How often this mod takes its theme back from another mod: at most `RETAKE_LIMIT` times in `RETAKE_WINDOW_MS`. */
+export const RETAKE_LIMIT = 6
+export const RETAKE_WINDOW_MS = 60_000
+
+/** The times of the last takes after one more at `now`, and whether that take is allowed. A refused take is not counted. */
+export function retakeBudget(times: readonly number[], now: number): { times: number[]; isAllowed: boolean } {
+  const recent = times.filter(t => now - t < RETAKE_WINDOW_MS)
+  if (recent.length >= RETAKE_LIMIT) return { times: recent, isAllowed: false }
+
+  return { times: [...recent, now], isAllowed: true }
+}

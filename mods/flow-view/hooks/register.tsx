@@ -1488,6 +1488,8 @@ export function drawPhases(b: Board, time?: TimeFacts): Drawing {
   // The day can close with tickets that are not done. The last step then says so: it is not a green check.
   const left = b.rows.filter(r => bucket(r.state) !== 'done').length
   const isClosedOpen = b.phase === 'done' && left > 0
+  // When the agents ended their pass and every ticket that is left waits for the person, the day is not closed: the person is next.
+  const isYourTurn = isClosedOpen && b.rows.every(r => bucket(r.state) === 'done' || bucket(r.state) === 'needs')
   const total = b.rows.length
   const tall = time === undefined ? 132 : 150
   let svg =
@@ -1536,8 +1538,9 @@ export function drawPhases(b: Board, time?: TimeFacts): Drawing {
     const isLast = i === PHASES.length - 1
     const state = at < 0 ? 'idle' : isLast && isClosedOpen ? 'stopped' : i < at || b.phase === 'done' ? 'completed' : i === at ? 'running' : 'idle'
     const label = isLast && isClosedOpen ? `closed, ${left} open` : name
-    // The text under a step is short, so two texts do not touch: the tooltip has the full words.
-    const short = isLast && isClosedOpen ? `${left} open` : name === 'housekeeping' ? 'cleanup' : name
+    // The text under a step is one word, a phase of the day, so two texts do not touch. The last step reads "done", or
+    // "closed" when the day ended with tickets that are not done: the number of open tickets is in the tooltip and the ring.
+    const short = isLast ? (isYourTurn ? 'needs you' : isClosedOpen ? 'closed' : 'done') : ({ housekeeping: 'setup', running: 'working' } as Record<string, string>)[name] ?? name
     if (i > 0) {
       const lit = i <= at ? HUE.completed : EDGE
       const from = Math.round(x0 + (i - 1) * stepX) + 14
@@ -1545,7 +1548,7 @@ export function drawPhases(b: Board, time?: TimeFacts): Drawing {
     }
     const anchor = `x="${x}" text-anchor="middle"`
     svg +=
-      `<g><title>${esc(label)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : state === 'stopped' ? 'the day is closed, and some tickets are not done' : 'waits'}</title>` +
+      `<g><title>${esc(label)}: ${state === 'completed' ? 'done' : state === 'running' ? 'now' : state === 'stopped' ? (isYourTurn ? `the agents did all they can, and ${plural(left, 'ticket')} ${left === 1 ? 'waits' : 'wait'} for you` : `the day is closed, and ${plural(left, 'ticket')} ${left === 1 ? 'is' : 'are'} not done`) : 'waits'}</title>` +
       `<g filter="url(#shadow)"><circle cx="${x}" cy="${y}" r="12" fill="${CARD}"/></g>` +
       `<circle cx="${x}" cy="${y}" r="12" fill="none" stroke="${HUE[state]}" stroke-width="1.6"${state === 'idle' ? '' : ' filter="url(#glow)"'}/>` +
       icon(state, x, y) +

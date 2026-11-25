@@ -378,7 +378,14 @@ test('a closed day with open tickets does not show a green done step', () => {
   expect(open).not.toContain('blocked: 0')
   const all = drawPhases({ ...day, rows: [row('a', 'verified'), row('d', 'merged')] }).source
   expect(all).not.toContain('closed,')
-  expect(open).toContain('>2 open</text>')
+  // One ticket waits for the person and one is in review: the day is closed with work that is not the person's alone.
+  expect(open).toContain('>closed</text>')
+  expect(open).toContain('2 tickets are not done')
+  // Every ticket that is left waits for the person: the last step says "needs you", the same words as the tile and the group.
+  const turn = drawPhases({ ...day, rows: [row('a', 'verified'), row('b', 'needs-you'), row('c', 'blocked')] }).source
+  expect(turn).toContain('>needs you</text>')
+  expect(turn).toContain('2 tickets wait for you')
+  expect(open).toContain('>setup</text>')
   expect(all).toContain('>done</text>')
   expect(all).toContain('100%')
 })

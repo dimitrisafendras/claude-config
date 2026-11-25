@@ -1,7 +1,7 @@
 import type { On, ThemeSetArgs } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { THEMES, themeOf } from '../hooks/themes'
+import { THEMES, retakeBudget, themeOf } from '../hooks/themes'
 
 const RUN = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 80 } }
 const START = { cwd: '/work', surface: 'desktop', isInteractive: true } as const
@@ -156,6 +156,19 @@ test('Pokémon Pixel shows the context as HP and more creatures as the window fi
   expect(high).toContain('id="wild-splash"')
   expect(high).toContain('id="wild-sprout"')
   await ui.unmount()
+})
+
+test('the takes of the theme back from another mod are limited to six in a minute', () => {
+  let times: number[] = []
+  const allowed: boolean[] = []
+  for (let i = 0; i < 8; i++) {
+    const r = retakeBudget(times, i * 1000)
+    times = r.times
+    allowed.push(r.isAllowed)
+  }
+  expect(allowed).toEqual([true, true, true, true, true, true, false, false])
+  // A minute later the budget is whole again.
+  expect(retakeBudget(times, 61_000).isAllowed).toBe(true)
 })
 
 test('the fill is also read on the timer, so /clear lowers the snow', async ($, on) => {
