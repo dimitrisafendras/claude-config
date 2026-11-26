@@ -216,20 +216,54 @@ for src, text in sources.items():
 linked = {x for ed in edges for x in ed}
 ORDER = ['routine'] + ['l%d' % l for l, _, _ in LAYERS] + ['l0', 'mod', 'script']
 g_nodes = [n for g in ORDER for n in sorted(kind_of) if group_of(n) == g and (kind_of[n] == 'skill' or n in linked)]
-ROW, GX, GW = 19, 214, 560
-gy = {n: 16 + i * ROW for i, n in enumerate(g_nodes)}
-GH = 16 + len(g_nodes) * ROW
-gs = ['<svg class="graph" id="graph" viewBox="0 0 %d %d" role="img" aria-label="Which part calls which other part.">' % (GW, GH)]
+# The picture is a UML component diagram. Each group is a package: the triggers, the layers of the skills from the
+# top to the bottom, then the mods and the scripts. Each part is a component in its package. A call is an arrow.
+# The layers go down the page, so a call between two layers goes down.
+UW, PAD, BH, BG, RG = 1000, 22, 28, 14, 12   # width, side padding of a package, box height, box gap, row gap
+packages = [('routine', '«trigger» routines')] + [('l%d' % l, '«layer %d» %s' % (l, name)) for l, name, _ in LAYERS] \
+    + [('l0', '«skill» no layer'), ('mod', '«component» mods'), ('script', '«component» scripts and agents')]
+gy, pk_boxes, y = {}, [], 8   # gy: part -> (x, y, width)
+for g, label in packages:
+    members = [n for n in g_nodes if group_of(n) == g]
+    if not members: continue
+    rows, used = [[]], 0
+    for n in members:
+        w = max(88, len(n) * 6.7 + 38)
+        if rows[-1] and used + w > UW - 2 * PAD - 12: rows.append([]); used = 0
+        rows[-1].append((n, w)); used += w + BG
+    top = y; y += 32
+    for r in rows:
+        x = (UW - (sum(w for _, w in r) + BG * (len(r) - 1))) / 2.0
+        for n, w in r: gy[n] = (x, y, w); x += w + BG
+        y += BH + RG
+    pk_boxes.append((g, label, top, y - top + 2))
+    y += 40   # room for the arrows between two packages
+UH = y - 30
+gs = ['<svg class="graph uml" id="graph" viewBox="0 0 %d %d" role="img" aria-label="A UML component diagram: the triggers, the layers of the skills, the mods and the scripts as packages, and each call as an arrow. The calls between the layers go down.">' % (UW, UH),
+      '<defs><marker id="uarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1L9 5L1 9" style="fill:none;stroke:var(--ink);stroke-width:1.4"/></marker></defs>']
+for g, label, top, h in pk_boxes:
+    tw = len(label) * 6.3 + 20
+    gs.append('<g class="pk g-%s"><rect x="6" y="%d" width="%.0f" height="17"/><rect x="6" y="%d" width="%d" height="%d"/><text x="15" y="%d">%s</text></g>' % (g, top, tw, top + 17, UW - 12, h - 17, top + 12, e(label)))
 for (a, b), t in sorted(edges.items()):
     if a not in gy or b not in gy: continue
-    y1, y2 = gy[a], gy[b]; d = abs(y2 - y1)
-    gs.append('<path class="ed%s s-%s" data-s="%s" data-t="%s" data-y="%s" d="M%d %d A%.0f %.1f 0 0 %d %d %d"/>' % (' hint' if t == 'h' else '', group_of(a), e(a), e(b), t, GX, y1, min(320, 24 + d * 0.42), d / 2.0, 1 if y2 > y1 else 0, GX, y2))
+    xa, ya, wa = gy[a]; xb, yb, wb = gy[b]; ca, cb = xa + wa / 2.0, xb + wb / 2.0
+    if abs(ya - yb) < 1:      # the same row: a loop below the two boxes
+        d = 'M%.1f %.1f C%.1f %.1f %.1f %.1f %.1f %.1f' % (ca, ya + BH, ca, ya + BH + 24, cb, yb + BH + 24, cb, yb + BH + 1)
+    elif yb > ya:             # down: from the bottom of the caller to the top of the part that it calls
+        k = max(22, (yb - ya - BH) * 0.45)
+        d = 'M%.1f %.1f C%.1f %.1f %.1f %.1f %.1f %.1f' % (ca, ya + BH, ca, ya + BH + k, cb, yb - k, cb, yb - 1)
+    else:                     # up
+        k = max(22, (ya - yb - BH) * 0.45)
+        d = 'M%.1f %.1f C%.1f %.1f %.1f %.1f %.1f %.1f' % (ca, ya, ca, ya - k, cb, yb + BH + k, cb, yb + BH + 1)
+    kind = ' hint' if t == 'h' else (' use' if kind_of[a] in ('mod', 'script') or kind_of[b] in ('mod', 'script') else '')
+    gs.append('<path class="ed%s s-%s" data-s="%s" data-t="%s" data-y="%s" marker-end="url(#uarr)" d="%s"/>' % (kind, group_of(a), e(a), e(b), t, d))
 for n in g_nodes:
-    gs.append('<g class="nd g-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="hitbox" x="0" y="%d" width="%d" height="%d"/><text x="%d" y="%d" text-anchor="end">%s</text><circle cx="%d" cy="%d" r="3.6"/></g>' % (group_of(n), e(n), e(n), gy[n] - 9, GX + 10, ROW, GX - 12, gy[n] + 4, e(n), GX, gy[n]))
+    x, y0, w = gy[n]
+    gs.append('<g class="nd g-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="box" x="%.1f" y="%d" width="%.1f" height="%d" rx="3"/><rect class="lug" x="%.1f" y="%d" width="9" height="5"/><rect class="lug" x="%.1f" y="%d" width="9" height="5"/><text x="%.1f" y="%d" text-anchor="middle">%s</text></g>' % (group_of(n), e(n), e(n), x, y0, w, BH, x - 4, y0 + 6, x - 4, y0 + 17, x + w / 2.0 + 5, y0 + 18, e(n)))
 gs.append('</svg>')
 graph_html = "\n".join(gs)
 in_graph = sorted([a, b, t] for (a, b), t in edges.items() if a in gy and b in gy)
-graph_data = json.dumps({'x': GX, 'row': ROW, 'w': GW, 'n': {n: [group_of(n), about.get(n, ''), 1 if co_of.get(n) else 0] for n in g_nodes}, 'e': in_graph}).replace('</', '<\\/')
+graph_data = json.dumps({'n': {n: [group_of(n), about.get(n, ''), 1 if co_of.get(n) else 0] for n in g_nodes}, 'e': in_graph}).replace('</', '<\\/')
 N_EDGES = sum(1 for x in in_graph if x[2] == 'c')
 # The layers as a short listing, and one flag for each group of the graph.
 lay_rows = ['<li class="item g-routine"><span class="nm">0 trigger</span><span class="ds">a routine, a slash command or an event starts something</span></li>']
@@ -345,28 +379,36 @@ ul.logs{list-style:none;margin:0;padding:.5rem 0}
 .flags button[aria-pressed="false"]{color:var(--dim);font-weight:400;text-decoration:line-through}
 .flags button:focus-visible{outline:2px solid var(--skill);outline-offset:2px}
 .flags .com{margin-left:auto}
-/* The call graph: the parts down one line, an arc for each call. The chosen part and its calls are lit. */
-.deps{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}
-.deps .scroll{border-right:1px solid var(--line);padding:.6rem .4rem}
-.graph{display:block;width:100%;min-width:430px;height:auto}
-.graph .ed{fill:none;stroke-width:1.1;opacity:.28}
+/* The call graph as a UML component diagram. At rest it shows the calls between the skills and from the routines.
+   The arrows to the mods and the scripts, and the hints, show for the chosen part only. */
+.deps{display:block}
+.deps .scroll{padding:.7rem .5rem .4rem}
+figure{margin:0}
+.graph{display:block;width:100%;min-width:900px;height:auto}
+.graph .pk rect{fill:color-mix(in srgb,var(--k) 5%,var(--panel));stroke:color-mix(in srgb,var(--k) 55%,var(--line));stroke-width:1}
+.graph .pk text{font-family:var(--mono);font-size:10.5px;fill:var(--k)}
+.graph .ed{fill:none;stroke-width:1.2;opacity:.42}
+.graph .ed.use{stroke-dasharray:5 3;opacity:0}
+.graph .ed.hint{stroke-dasharray:1 5;opacity:0}
 .graph .nd{cursor:pointer;outline:none}
-.graph .hitbox{fill:transparent}
-.graph .nd text{font-family:var(--mono);font-size:11px;fill:var(--dim)}
-.graph .nd circle{fill:var(--k)}
-.graph .nd:hover text,.graph .nd:focus-visible text{fill:var(--ink)}
+.graph .nd .box{fill:var(--bg);stroke:var(--k);stroke-width:1.1}
+.graph .nd .lug{fill:var(--bg);stroke:var(--k);stroke-width:1}
+.graph .nd text{font-family:var(--mono);font-size:11px;fill:var(--ink)}
+.graph .nd:hover .box,.graph .nd:focus-visible .box{stroke-width:2.2}
 .graph.sel .ed{opacity:.05}
-.graph.sel .ed.on{opacity:1;stroke-width:1.8;stroke-dasharray:5 4;animation:run .9s linear infinite}
-.graph.sel .nd text{opacity:.45}
-.graph.sel .nd.on text{opacity:1;fill:var(--ink)}
-.graph.sel .nd.me text{opacity:1;fill:var(--k);font-weight:600}
-.graph.sel .nd.me circle{r:5.5}
+.graph.sel .ed.use,.graph.sel .ed.hint{opacity:0}
+.graph.sel .ed.on{opacity:1;stroke-width:1.9}
+.graph.sel .ed.on:not(.use):not(.hint){stroke-dasharray:6 4;animation:run .9s linear infinite}
+.graph.sel .ed.hint.on{opacity:.6;stroke-width:1.2}
+.graph.sel .nd{opacity:.3}
+.graph.sel .nd.on{opacity:1}
+.graph.sel .nd.me .box{fill:color-mix(in srgb,var(--k) 26%,var(--bg));stroke-width:2.4}
+figcaption{display:flex;flex-wrap:wrap;gap:.2rem 2.2ch;padding:.2rem .5rem .7rem;color:var(--dim)}
+figcaption svg{width:34px;height:10px;vertical-align:middle;margin-right:.8ch}
+figcaption line{stroke:var(--ink);stroke-width:1.4}
 @keyframes run{to{stroke-dashoffset:-18}}
 .s-routine{stroke:var(--routine)}.s-mod{stroke:var(--mod)}.s-script{stroke:var(--script)}.s-l0{stroke:var(--dim)}.s-l1{stroke:var(--l1)}.s-l2{stroke:var(--l2)}.s-l3{stroke:var(--l3)}.s-l4{stroke:var(--l4)}.s-l5{stroke:var(--l5)}.s-l9{stroke:var(--l9)}
-/* A hint: a skill names another skill as a next step for the person. It is not a call, so it is faint and dashed. */
-.graph .ed.hint{stroke-dasharray:1 5;opacity:.16}
-.graph.sel .ed.hint.on{opacity:.55;stroke-width:1.2;stroke-dasharray:1 5;animation:none}
-.man{position:sticky;top:calc(env(safe-area-inset-top,0px) + 3.2rem);padding:.9rem 1rem 1.1rem;display:flex;flex-direction:column;gap:.1rem;min-width:0;background:var(--panel);border-radius:0 10px 10px 0}
+.man{position:sticky;bottom:0;z-index:2;max-height:30vh;overflow:auto;padding:.8rem 1rem 1rem;display:flex;flex-direction:column;gap:.1rem;min-width:0;background:var(--raised);border-top:1px solid var(--line);border-radius:0 0 10px 10px}
 .man h4{font:inherit;font-weight:600;color:var(--dim);margin:.7rem 0 .1rem;letter-spacing:.06em}
 .man h4:first-child{margin-top:0}
 .man p{margin:0 0 0 2ch;color:var(--ink);overflow-wrap:anywhere}
@@ -375,7 +417,7 @@ ul.logs{list-style:none;margin:0;padding:.5rem 0}
 .man button{font:inherit;font-weight:600;color:var(--k);background:none;border:0;padding:0;cursor:pointer;text-align:left}
 .man button:hover,.man button:focus-visible{text-decoration:underline;outline:none}
 .man .nil{color:var(--dim)}
-@media (max-width:760px){.deps{grid-template-columns:minmax(0,1fr)}.deps .scroll{border-right:0;order:2}.man{order:1;border-bottom:1px solid var(--line);border-radius:0;z-index:2}}
+
 
 /* The listings: a name, then what it does as a comment. */
 .find{flex:1 1 12ch;min-width:10ch;max-width:30ch;background:transparent;border:0;border-bottom:1px dashed var(--dim);color:var(--ink);font:inherit;padding:0 .3ch;margin:0 .6ch}
@@ -407,7 +449,7 @@ td.kind{font-family:var(--mono);font-weight:600;font-size:.84rem;color:var(--k,v
 .rule{margin:1.2rem 0 0;font-family:var(--display);font-weight:500;font-size:clamp(1.15rem,2.6vw,1.5rem);line-height:1.3;letter-spacing:-.01em;max-width:32ch;text-wrap:balance}
 .rule b:nth-of-type(1){color:var(--skill)}.rule b:nth-of-type(2){color:var(--mod)}.rule b:nth-of-type(3){color:var(--routine)}
 footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76rem}
-@media (prefers-reduced-motion:reduce){.cur,.ln.st,.log.next,.grid.in .item,.grid.in .log,.graph.sel .ed.on{animation:none}}
+@media (prefers-reduced-motion:reduce){.cur,.ln.st,.log.next,.grid.in .item,.grid.in .log,.graph.sel .ed.on:not(.use):not(.hint){animation:none}}
 </style>
 <div class="wrap">
 <header>
@@ -470,15 +512,16 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
 <ul class="rows">
 @@LAYERS@@
 </ul></div>
-<p class="sub">A solid arc is one call, in the color of the part that makes it. A faint dotted arc is a hint: a skill names another skill as the next step for the person. Select a part to see what it does, what it calls and what calls it. To remove parts, type a part of their name after <code>grep -v</code> (some words with a space between them remove more), or set a flag to off.</p>
-<div class="term"><label class="cmd" for="f2"><b>$</b>deps --graph | grep -v<input class="find" id="f2" type="search" placeholder="text" aria-label="Hide the parts whose name has this text"></label>
+<p class="sub">The diagram is a UML component diagram. A package is a layer, a box is a part, and an arrow is one call, in the color of the part that makes it. The layers go down the page, so a call between two layers points down. Select a part to see what it does, what it calls and what calls it. To remove parts, type a part of their name after <code>grep -v</code> (some words with a space between them remove more), or set a flag to off.</p>
+<div class="term"><label class="cmd" for="f2"><b>$</b>deps --uml | grep -v<input class="find" id="f2" type="search" placeholder="text" aria-label="Hide the parts whose name has this text"></label>
 <div class="flags" id="flags" role="group" aria-label="Kinds of part in the graph">
 @@FLAGS@@<button type="button" data-f="company" aria-pressed="true">--company</button>
 <span class="com" id="gcount"></span></div>
 <div class="deps">
-<div class="scroll">
+<figure><div class="scroll">
 @@GRAPH@@
 </div>
+<figcaption><span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5"/></svg>calls</span><span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke-dasharray="5 3"/></svg>uses a mod or a script (shown for the chosen part)</span><span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke-dasharray="1 5"/></svg>names as a next step (shown for the chosen part)</span></figcaption></figure>
 <div class="man" id="man" aria-live="polite"><h4>NAME</h4><p class="nil">Select a part in the graph.</p></div>
 </div></div>
 <script type="application/json" id="gdata">@@GDATA@@</script>
@@ -561,7 +604,7 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
     var box=add('div','list',null,man);
     list.forEach(function(id){var b=add('button','g-'+G.n[id][0],id,box);b.type='button';b.addEventListener('click',function(){pick(id)})});
   }
-  var vis={},cur=null,off={},f2=document.getElementById('f2'),flags=document.getElementById('flags'),gcount=document.getElementById('gcount'),nds=[],eds=[],y0={};
+  var vis={},cur=null,off={},f2=document.getElementById('f2'),flags=document.getElementById('flags'),gcount=document.getElementById('gcount'),nds=[],eds=[];
   function pick(id){
     if(!G||!svg||!G.n[id]||!vis[id])return;
     cur=id;var out=[],inn=[];
@@ -582,29 +625,26 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
     Object.keys(most).forEach(function(k){if(!any||most[k]>most[any])any=k;if(G.n[k][0].charAt(0)==='l'&&(!top||most[k]>most[top]))top=k});
     return top||any||Object.keys(vis)[0]||null;
   }
-  // Hide the parts that the filters remove, move the others up, and draw each arc again between the new places.
+  // Hide the parts that the filters remove, and each arrow that has lost an end. The other parts keep their places.
   function layout(){
-    var terms=(f2?f2.value:'').toLowerCase().split(/[\s,]+/).filter(Boolean),y=16,calls=0,parts=0;
+    var terms=(f2?f2.value:'').toLowerCase().split(/[\s,]+/).filter(Boolean),calls=0,parts=0;
     vis={};
     nds.forEach(function(n){
       var id=n.getAttribute('data-id'),d=G.n[id],hide=!!off[d[0]]||(d[2]&&off.company)||terms.some(function(t){return id.toLowerCase().indexOf(t)>=0});
       n.style.display=hide?'none':'';
-      if(!hide){vis[id]=y;n.setAttribute('transform','translate(0 '+(y-y0[id])+')');y+=G.row;parts++}
+      if(!hide){vis[id]=1;parts++}
     });
     eds.forEach(function(p){
-      var a=vis[p.getAttribute('data-s')],b=vis[p.getAttribute('data-t')];
-      if(!a||!b){p.style.display='none';return}
-      var dd=Math.abs(b-a);if(p.getAttribute('data-y')==='c')calls++;p.style.display='';
-      p.setAttribute('d','M'+G.x+' '+a+' A'+Math.min(320,24+dd*.42).toFixed(0)+' '+(dd/2).toFixed(1)+' 0 0 '+(b>a?1:0)+' '+G.x+' '+b);
+      var ok=vis[p.getAttribute('data-s')]&&vis[p.getAttribute('data-t')];
+      p.style.display=ok?'':'none';if(ok&&p.getAttribute('data-y')==='c')calls++;
     });
-    svg.setAttribute('viewBox','0 0 '+G.w+' '+Math.max(y,40));
     if(gcount)gcount.textContent='# '+parts+' parts, '+calls+' calls';
     if(cur&&vis[cur])pick(cur);else{var t=busiest();if(t)pick(t);else{svg.classList.remove('sel');man.textContent='';add('h4','','NAME',man);add('p','nil','No part is left. Remove a filter.',man)}}
     try{localStorage.setItem('setup-map-graph2',JSON.stringify({off:off,text:f2?f2.value:''}))}catch(x){}
   }
   if(G&&svg){
     nds=[].slice.call(svg.querySelectorAll('.nd'));eds=[].slice.call(svg.querySelectorAll('.ed'));
-    nds.forEach(function(n){var id=n.getAttribute('data-id');y0[id]=+n.querySelector('circle').getAttribute('cy');
+    nds.forEach(function(n){var id=n.getAttribute('data-id');
       n.addEventListener('click',function(){pick(id)});n.addEventListener('mouseenter',function(){pick(id)});
       n.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pick(id)}})});
     try{var saved=JSON.parse(localStorage.getItem('setup-map-graph2')||'null');if(saved){off=saved.off||{};if(f2&&typeof saved.text==='string')f2.value=saved.text}}catch(x){off={}}
