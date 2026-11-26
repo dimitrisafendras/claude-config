@@ -83,15 +83,19 @@ def cron_words(c):
     if len(parts) != 5: return c
     mi, h, dom, mon, dow = parts
     days = {'*': 'daily', '1-5': 'Mon–Fri', '1': 'Monday'}.get(dow, 'on days ' + dow)
-    def hh(x): return x.zfill(2)
-    times = ' and '.join('%s:%s' % (hh(x), mi.zfill(2)) for x in h.split(','))
+    times = ' and '.join('%s:%s' % (x.zfill(2), mi.zfill(2)) for x in h.split(','))
     return '%s %s' % (times, days)
-routines = []
+def crons_of(raw):
+    # One cron line, or a list of them: every run of five cron fields in the value.
+    return [' '.join(c.split()) for c in re.findall(r'(?:[\d*,/-]+\s+){4}[\d*,/-]+', raw)]
+routines = []   # (first minute of the day, cron lines, name, what it does)
 for p in sorted(glob.glob(CORE + '/routines/*.md')):
     if p.endswith('README.md'): continue
     f = front(p)
-    routines.append((cron_words(f.get('schedule', '?').split('#')[0].strip().strip('"')), f.get('name', os.path.basename(p)[:-3]), first_sentence(f.get('description', ''), 130)))
-routines.sort(key=lambda r: r[0])
+    crons = crons_of(f.get('schedule', ''))
+    mins = [int(x) * 60 + int(c.split()[0]) for c in crons for x in c.split()[1].split(',') if x.isdigit() and c.split()[0].isdigit()]
+    routines.append((min(mins) if mins else 9999, crons, f.get('name', os.path.basename(p)[:-3]), first_sentence(f.get('description', ''), 130)))
+routines.sort()
 extras = []
 for p in sorted(glob.glob(CORE + '/claude/scripts/*.sh')):
     line = ''
@@ -103,181 +107,435 @@ for p in sorted(glob.glob(CORE + '/claude/agents/*.md')):
     extras.append((os.path.basename(p)[:-3], first_sentence(front(p).get('description', 'An agent.'))))
 N_SKILLS, N_MODS, N_ROUT, N_EXTRA = len(skills), len(mods), len(routines), len(extras)
 
+# The page is a set of terminal panes: each section is a command and its output.
 def item(n, d, k, v='', co=0):
-    tag = '<span class="co">company</span>' if co else ''
-    ver = f'<em>{v}</em>' if v else ''
-    return f'<li class="item{" is-co" if co else ""}" data-k="{e((n+" "+d).lower())}"><span class="nm">{e(n)} {ver}{tag}</span><span class="ds">{e(d)}</span></li>'
+    tag = '<span class="co">[company]</span>' if co else ''
+    ver = f'<em>{e(v)}</em>' if v else ''
+    return f'<li class="item{" is-co" if co else ""}" data-k="{e((n+" "+d).lower())}"><span class="nm">{e(n)}{ver}{tag}</span><span class="ds">{e(d)}</span></li>'
 
 skills_html = "\n".join(item(n,d,'s','',c) for n,d,c in skills)
 mods_html = "\n".join(item(n,d,'m',v,c) for n,v,d,c in mods)
 extras_html = "\n".join(item(n,d,'x') for n,d in extras)
-flows_html = "\n".join('<div class="flow"><h3>%s</h3><ol>%s</ol></div>' % (e(t), "".join('<li><b>%s</b><span>%s</span></li>' % (e(a), e(b)) for a,b in s)) for t,s in flows)
-routines_html = "\n".join('<tr><td class="mono">%s</td><td class="nm">%s</td><td>%s</td></tr>' % (e(a), e(b), e(c)) for a,b,c in routines)
-rules_html = "\n".join('<li><b>%s</b>%s</li>' % (e(a), e(b)) for a,b in rules)
+rules_html = "\n".join('<li class="item"><span class="nm">%s</span><span class="ds">%s</span></li>' % (e(a.replace(' ', '_')), e(b)) for a,b in rules)
 
-page = '''<title>Setup Map</title>
+# ---- how it fits: the folder as a tree ----
+tree_rows = [('skills/', N_SKILLS, 'k-skill', 'text files of steps, typed as a slash command'),
+             ('mods/', N_MODS, 'k-mod', 'code inside the app: panes, themes, hooks'),
+             ('routines/', N_ROUT, 'k-routine', 'prompts on a schedule, nobody watches'),
+             ('*.sh  agents/', N_EXTRA, 'k-script', 'exact jobs: memory, merge, ticket claims')]
+tree = ['<span class="dir">~/.claude</span>']
+for nm, cnt, k, what in tree_rows:
+    tree.append('├── <b class="kc %s">%s</b>%s<span class="num">%3d</span>   <span class="com"># %s</span>' % (k, e(nm), ' ' * (16 - len(nm)), cnt, e(what)))
+tree.append('├── settings.json  profile.md  merge-policy.json   <span class="com"># the rules that all parts follow</span>')
+tree.append('└── claims/  autonomy.off                          <span class="com"># one owner for a ticket, and the kill switch</span>')
+tree.append('')
+tree.append('<span class="com"># Claude Code reads this folder in the desktop app, the terminal CLI, the scheduled runs and the lane sessions.</span>')
+tree_html = "\n".join(tree)
+
+# ---- the flows: each loop as code. A program counter goes down the steps (--i is the step, --n the number of steps). ----
+def flow_code(title, steps):
+    slug = re.sub(r'[^a-z0-9]+', '_', title.lower()).strip('_')
+    w = max(len('  step("%s");' % a) for a, _ in steps) + 2
+    ln = ['<span class="ln"><span class="kw">while</span> (autonomy.<span class="fn">on</span>()) {</span>']
+    for i, (a, b) in enumerate(steps):
+        raw = '  step("%s");' % a
+        ln.append('<span class="ln st" style="--i:%d">  <span class="fn">step</span>(<span class="str">"%s"</span>);%s<span class="com">// %s</span></span>' % (i, e(a), ' ' * (w - len(raw)), e(b)))
+    ln.append('<span class="ln">}</span>')
+    return '<div class="term flow" style="--n:%d"><div class="cmd"><span class="file">%s.loop</span><span class="hint">%s · %d steps</span></div><div class="scroll"><pre class="code">%s</pre></div></div>' % (len(steps), e(slug), e(title), len(steps), "".join(ln))
+flows_html = "\n".join(flow_code(t, s) for t, s in flows)
+
+# ---- the day of the loops: a log of the day, one line for each run. The script of the page adds the state on the real clock. ----
+log_rows = []
+for first, crons, name, what in routines:
+    for c in crons:
+        mi, h, dom, mon, dow = c.split()
+        days = {'*': 'daily', '1-5': 'Mon–Fri', '1': 'Monday'}.get(dow, 'days ' + dow)
+        for x in h.split(','):
+            if not (x.isdigit() and mi.isdigit()): continue
+            m0 = int(x) * 60 + int(mi)
+            log_rows.append((m0, '<li class="log" data-m="%d" data-d="%s" data-n="%s"><span class="lt">%02d:%02d</span><span class="cn">%s</span><span class="st">%s</span><span class="com">%s</span></li>' % (m0, e(dow), e(name), m0 // 60, m0 % 60, e(name), e(days), e(what))))
+log_rows.sort(key=lambda r: r[0])
+cron_html = "\n".join(r[1] for r in log_rows)
+
+# ---- the call graph: which part names which other part in its own text ----
+# A skill, a routine or a mod "calls" a part when its files name that part: /name or `name` for a skill,
+# name.sh for a script, `name` or mcp__name__ for a mod. The graph is read from the files, so it stays current.
+def read_all(paths):
+    out = []
+    for q in paths:
+        try: out.append(open(q, encoding='utf-8', errors='replace').read())
+        except OSError: pass
+    return "\n".join(out)
+def skill_ref(n): return re.compile(r'(?:(?<![\w./-])/|`/?)' + re.escape(n) + r'(?![\w-])(?!\.\w)')
+def mod_ref(n): return re.compile(r'`' + re.escape(n) + r'`|mcp__' + re.escape(n) + r'__')
+kind_of, about = {}, {}
+for n, d, c in skills: kind_of[n] = 'skill'; about[n] = d
+for n, v, d, c in mods:
+    if n not in kind_of: kind_of[n] = 'mod'; about[n] = d
+for first, crons, n, d in routines:
+    if n not in kind_of: kind_of[n] = 'routine'; about[n] = d
+for n, d in extras:
+    if n not in kind_of: kind_of[n] = 'script'; about[n] = d
+sources = {}
+for root in (CORE + '/claude/skills', PROF + '/skills'):
+    for d in sorted(glob.glob(root + '/*/')):
+        sources[os.path.basename(d.rstrip('/'))] = read_all(glob.glob(d + '**/*.md', recursive=True))
+for q in glob.glob(CORE + '/routines/*.md'):
+    f = front(q); n = f.get('name', os.path.basename(q)[:-3])
+    if kind_of.get(n) == 'routine': sources[n] = read_all([q]) + "\n" + " ".join('`%s`' % x.strip() for x in f.get('skills', '').strip('[]').split(',') if x.strip())
+edges = set()
+for src, text in sources.items():
+    if src not in kind_of: continue
+    for n, k in kind_of.items():
+        if n == src: continue
+        hit = (k == 'skill' and skill_ref(n).search(text)) or (k == 'script' and n.endswith('.sh') and n in text) or (k == 'mod' and mod_ref(n).search(text))
+        if hit: edges.add((src, n))
+linked = {x for ed in edges for x in ed}
+g_nodes = [n for k in ('routine', 'skill', 'mod', 'script') for n in sorted(kind_of) if kind_of[n] == k and (k == 'skill' or n in linked)]
+ROW, GX, GW = 19, 214, 560
+gy = {n: 16 + i * ROW for i, n in enumerate(g_nodes)}
+GH = 16 + len(g_nodes) * ROW
+gs = ['<svg class="graph" id="graph" viewBox="0 0 %d %d" role="img" aria-label="Which part calls which other part.">' % (GW, GH)]
+for a, b in sorted(edges):
+    if a not in gy or b not in gy: continue
+    y1, y2 = gy[a], gy[b]; d = abs(y2 - y1)
+    gs.append('<path class="ed s-%s" data-s="%s" data-t="%s" d="M%d %d A%.0f %.1f 0 0 %d %d %d"/>' % (kind_of[a], e(a), e(b), GX, y1, min(320, 24 + d * 0.42), d / 2.0, 1 if y2 > y1 else 0, GX, y2))
+for n in g_nodes:
+    gs.append('<g class="nd k-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="hitbox" x="0" y="%d" width="%d" height="%d"/><text x="%d" y="%d" text-anchor="end">%s</text><circle cx="%d" cy="%d" r="3.6"/></g>' % (kind_of[n], e(n), e(n), gy[n] - 9, GX + 10, ROW, GX - 12, gy[n] + 4, e(n), GX, gy[n]))
+gs.append('</svg>')
+graph_html = "\n".join(gs)
+graph_data = json.dumps({'n': {n: [kind_of[n], about.get(n, '')] for n in g_nodes}, 'e': sorted([a, b] for a, b in edges if a in gy and b in gy)}).replace('</', '<\\/')
+N_EDGES = sum(1 for a, b in edges if a in gy and b in gy)
+
+# ---- the footer facts come from the settings of the repo, when they are there ----
+foot = []
+try:
+    st = json.load(open(CORE + '/claude/settings.json', encoding='utf-8'))
+    if st.get('model'): foot.append('model=%s' % e(str(st['model'])))
+    if st.get('outputStyle'): foot.append('output_style=%s' % e(str(st['outputStyle'])))
+    en = st.get('enabledPlugins')
+    if isinstance(en, dict): foot.append('plugins_enabled=%d' % sum(1 for v in en.values() if v))
+except Exception:
+    pass
+footer_html = '  '.join(foot)
+
+page = r"""<title>Setup Map</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap">
 <style>
-/* Layout: one column under a sticky index. How it fits, the flows, then the parts: skills, mods, routines, safeguards. */
-:root{--bg:#f4f6fb;--surface:#ffffff;--ink:#14213d;--muted:#55627f;--line:#d8deec;--accent:#0f7b8a;--warm:#9a6412;--ok:#2f8f5b;
---display:"Space Grotesk",ui-sans-serif,system-ui,sans-serif;--body:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1430;--surface:#151c42;--ink:#e8edfb;--muted:#a3afd0;--line:#2a3568;--accent:#4cc3d4;--warm:#e2b44a;--ok:#5cd08f;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#0e1430;--surface:#151c42;--ink:#e8edfb;--muted:#a3afd0;--line:#2a3568;--accent:#4cc3d4;--warm:#e2b44a;--ok:#5cd08f;color-scheme:dark}
+/* Layout: a night terminal. Each section is a pane: a command line, then its output. The folder is a tree, the flows
+   are code with a program counter, the routines are a log of the day, the parts are listings.
+   One color for each kind of part, the same in every pane. */
+:root{--bg:#0a0d22;--panel:#0f1430;--raised:#182049;--ink:#eef1ff;--dim:#8f9ac6;--line:#283069;--dot:#1b2150;
+--skill:#38d8f0;--mod:#b996ff;--routine:#ffc44d;--script:#45e3a4;--glow:.16;
+--display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;--body:"Geist",ui-sans-serif,system-ui,sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;color-scheme:dark}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--glow:.10;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--glow:.10;color-scheme:light}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.55;padding-block:0 4rem;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-.wrap{max-width:1040px;margin:0 auto}
-header{padding-block:2.2rem 1.2rem}
-h1{font-family:var(--display);font-size:clamp(2rem,5vw,3.1rem);line-height:1.05;margin:0 0 .5rem;letter-spacing:-.02em}
-.lede{color:var(--muted);max-width:62ch;margin:0}
-nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);display:flex;gap:.25rem;flex-wrap:wrap;padding:.5rem 0}
-nav a{color:var(--muted);text-decoration:none;font-size:.85rem;padding:.35rem .7rem;border-radius:999px}
-nav a:hover,nav a:focus-visible{background:var(--surface);color:var(--ink);outline:2px solid var(--accent)}
-section{padding-block:2.4rem 0}
-h2{font-family:var(--display);font-size:1.5rem;margin:0 0 .3rem;letter-spacing:-.01em}
-h3{font-family:var(--display);font-size:1rem;margin:0 0 .6rem}
-.sub{color:var(--muted);margin:0 0 1.2rem;max-width:70ch}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.6rem;margin-top:1.4rem}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem}
-.stat b{display:block;font-family:var(--display);font-size:1.7rem;line-height:1.1;font-variant-numeric:tabular-nums}
-.stat span{color:var(--muted);font-size:.8rem}
-.diagram{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1rem;overflow-x:auto}
-.diagram svg{display:block;min-width:720px;width:100%;height:auto}
-.diagram text{font-family:var(--body);fill:var(--ink);font-size:13px}
-.diagram .t{font-family:var(--display);font-weight:700;font-size:14px}
-.diagram .m{fill:var(--muted);font-size:11.5px;font-family:var(--mono)}
-.box{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
-.hot{fill:none;stroke:var(--accent);stroke-width:2}
-.arr{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ah)}
-.find{width:100%;max-width:360px;padding:.55rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;margin-bottom:1rem}
-.find:focus-visible{outline:2px solid var(--accent)}
-ul.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:.6rem}
-.item{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;display:flex;flex-direction:column;gap:.2rem;min-width:0}
-.nm{font-family:var(--mono);font-weight:600;font-size:.88rem;overflow-wrap:anywhere}
-.nm em{font-style:normal;font-weight:400;color:var(--muted);margin-left:.4rem}
-.co{font-family:var(--body);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--warm);border:1px solid var(--warm);border-radius:999px;padding:0 .45rem;margin-left:.5rem;font-weight:600}
-.ds{color:var(--muted);font-size:.87rem}
-.item[hidden]{display:none}
-.tag{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--warm);margin:0 0 .5rem;font-weight:600}
-.flows{display:grid;gap:1rem}
-.flow{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem}
-.flow ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.7rem}
-.flow li{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;padding:.4rem .7rem;position:relative;min-width:0}
-.flow li+li::before{content:"→";position:absolute;left:-.62rem;top:.55rem;color:var(--muted);font-size:.8rem;background:var(--surface);line-height:1}
-.flow li b{font-family:var(--mono);font-size:.82rem;color:var(--accent)}
-.flow li span{font-size:.78rem;color:var(--muted)}
-.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
-table{border-collapse:collapse;width:100%;min-width:560px}
-td,th{text-align:left;padding:.6rem .9rem;border-bottom:1px solid var(--line);vertical-align:top;font-size:.9rem}
+body{background-color:var(--bg);background-image:radial-gradient(38rem 16rem at 22% 9rem,color-mix(in srgb,var(--mod) calc(var(--glow)*100%),transparent),transparent 70%),radial-gradient(34rem 15rem at 76% 6rem,color-mix(in srgb,var(--skill) calc(var(--glow)*100%),transparent),transparent 70%),radial-gradient(var(--dot) 1px,transparent 1.2px);background-repeat:no-repeat,no-repeat,repeat;background-size:100% 30rem,100% 30rem,22px 22px;color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.55;padding-block:0 4rem;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1080px;margin:0 auto}
+code{font-family:var(--mono);font-size:.88em;color:var(--ink);background:var(--raised);border-radius:4px;padding:.05em .35em}
+
+header{padding-block:3.2rem 1.6rem}
+.eyebrow{font-family:var(--mono);font-size:.84rem;color:var(--dim);margin:0 0 1rem}
+.eyebrow b,.cmd>b{color:var(--script);font-weight:600;margin-right:.6ch}
+.cur{display:inline-block;width:.6em;height:1.05em;background:var(--ink);vertical-align:-.18em;margin-left:.3ch;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(3.4rem,13vw,8.5rem);line-height:.86;letter-spacing:-.045em;margin:0 0 1.4rem;text-wrap:balance}
+.lede{color:var(--dim);max-width:60ch;margin:0;font-size:1.05rem}
+.lede b{color:var(--ink);font-weight:600}
+.stats{display:flex;flex-wrap:wrap;gap:.4rem 2.2rem;margin-top:2rem;border-top:1px solid var(--line);padding-top:1.2rem}
+.stat{display:flex;flex-direction:column;min-width:5.5rem}
+.stat b{font-family:var(--display);font-weight:700;font-size:clamp(2rem,5vw,2.9rem);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.stat span{font-family:var(--mono);font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-top:.35rem}
+.stat:nth-child(1) b{color:var(--skill)}.stat:nth-child(2) b{color:var(--mod)}.stat:nth-child(3) b{color:var(--routine)}.stat:nth-child(4) b{color:var(--script)}
+
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-block:1px solid var(--line);display:flex;gap:.15rem;flex-wrap:wrap;padding:.45rem 0;margin-top:1rem}
+nav a{font-family:var(--mono);font-size:.78rem;color:var(--dim);text-decoration:none;padding:.35rem .7rem;border-radius:6px}
+nav a::before{content:"./";opacity:.55}
+nav a:hover{background:var(--raised);color:var(--ink)}
+nav a:focus-visible,.find:focus-visible{outline:2px solid var(--skill);outline-offset:1px}
+
+section{padding-block:3.4rem 0;scroll-margin-top:3rem}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.4rem}
+h2{font-family:var(--display);font-weight:700;font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.05;letter-spacing:-.025em;margin:0;text-wrap:balance}
+.head .n{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.head .n b{color:var(--skill);font-weight:600}
+.sub{color:var(--dim);margin:0 0 1.2rem;max-width:68ch}
+
+/* A pane: the command line, then the output. Wide output scrolls inside the pane. */
+.term{background:var(--panel);border:1px solid var(--line);border-radius:10px;font-family:var(--mono);font-size:.8rem;line-height:1.7;min-width:0}
+.cmd{display:flex;align-items:center;gap:.2ch;flex-wrap:wrap;padding:.5rem .9rem;border-bottom:1px solid var(--line);color:var(--ink)}
+.cmd .hint{margin-left:auto;color:var(--dim)}
+.cmd .file{color:var(--routine)}
+.scroll{overflow-x:auto}
+pre{margin:0;font:inherit}
+.out{padding:.7rem .9rem;white-space:pre}
+.com{color:var(--dim)}.kw{color:var(--mod)}.fn{color:var(--skill)}.str{color:var(--script)}.num{color:var(--routine)}.dir{color:var(--ink);font-weight:600}
+.k-skill{--k:var(--skill)}.k-mod{--k:var(--mod)}.k-routine{--k:var(--routine)}.k-script{--k:var(--script)}
+.kc{color:var(--k);font-weight:600}
+
+/* The flows as code. The line number is a CSS counter. The lit line is the program counter. */
+.flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,470px),1fr));gap:.6rem}
+.code{display:inline-block;min-width:100%;padding:.5rem 0;counter-reset:ln;white-space:pre}
+.ln{display:block;padding-right:1rem;border-left:2px solid transparent}
+.ln::before{counter-increment:ln;content:counter(ln);display:inline-block;width:2.2rem;margin-right:1rem;text-align:right;color:var(--dim);opacity:.55}
+.ln.st{animation:pc calc(var(--n)*.8s) steps(1) infinite;animation-delay:calc(var(--i)*.8s)}
+@keyframes pc{0%{background:color-mix(in srgb,var(--skill) 16%,transparent);border-left-color:var(--skill)}calc(100%/var(--n)),100%{background:transparent;border-left-color:transparent}}
+
+/* The log of the day. With no script a line shows its days. The script adds: past, the next run with the time left, later, not today. */
+ul.logs{list-style:none;margin:0;padding:.5rem 0}
+.log{display:grid;grid-template-columns:6ch 23ch 14ch minmax(0,1fr);gap:0 2ch;padding:.1rem .9rem;border-left:2px solid transparent}
+.lt{color:var(--routine);font-variant-numeric:tabular-nums}
+.cn{color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+.st{color:var(--dim);white-space:nowrap}
+.log.past{opacity:.5}
+.log.off{opacity:.3}
+.log.later .st{color:var(--ink)}
+.log.next{background:color-mix(in srgb,var(--skill) 12%,transparent);border-left-color:var(--skill);animation:wait 2.4s ease-in-out infinite}
+.log.next .cn,.log.next .st{color:var(--skill)}
+.log.next .st{font-weight:600}
+@keyframes wait{50%{background:color-mix(in srgb,var(--skill) 5%,transparent)}}
+.tail{padding:0 .9rem .6rem;color:var(--dim)}
+@media (max-width:700px){.log{grid-template-columns:6ch minmax(0,1fr) auto}.log .com{grid-column:2/-1}}
+
+/* The call graph: the parts down one line, an arc for each call. The chosen part and its calls are lit. */
+.deps{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}
+.deps .scroll{border-right:1px solid var(--line);padding:.6rem .4rem}
+.graph{display:block;width:100%;min-width:430px;height:auto}
+.graph .ed{fill:none;stroke-width:1.1;opacity:.28}
+.graph .nd{cursor:pointer;outline:none}
+.graph .hitbox{fill:transparent}
+.graph .nd text{font-family:var(--mono);font-size:11px;fill:var(--dim)}
+.graph .nd circle{fill:var(--k)}
+.graph .nd:hover text,.graph .nd:focus-visible text{fill:var(--ink)}
+.graph.sel .ed{opacity:.05}
+.graph.sel .ed.on{opacity:1;stroke-width:1.8;stroke-dasharray:5 4;animation:run .9s linear infinite}
+.graph.sel .nd text{opacity:.45}
+.graph.sel .nd.on text{opacity:1;fill:var(--ink)}
+.graph.sel .nd.me text{opacity:1;fill:var(--k);font-weight:600}
+.graph.sel .nd.me circle{r:5.5}
+@keyframes run{to{stroke-dashoffset:-18}}
+.s-skill{stroke:var(--skill)}.s-mod{stroke:var(--mod)}.s-routine{stroke:var(--routine)}.s-script{stroke:var(--script)}
+.man{position:sticky;top:calc(env(safe-area-inset-top,0px) + 3.2rem);padding:.9rem 1rem 1.1rem;display:flex;flex-direction:column;gap:.1rem;min-width:0;background:var(--panel);border-radius:0 10px 10px 0}
+.man h4{font:inherit;font-weight:600;color:var(--dim);margin:.7rem 0 .1rem;letter-spacing:.06em}
+.man h4:first-child{margin-top:0}
+.man p{margin:0 0 0 2ch;color:var(--ink);overflow-wrap:anywhere}
+.man p .kc{font-size:1.05em}
+.man .list{margin:0 0 0 2ch;display:flex;flex-wrap:wrap;gap:.1rem 1.6ch}
+.man button{font:inherit;font-weight:600;color:var(--k);background:none;border:0;padding:0;cursor:pointer;text-align:left}
+.man button:hover,.man button:focus-visible{text-decoration:underline;outline:none}
+.man .nil{color:var(--dim)}
+@media (max-width:760px){.deps{grid-template-columns:minmax(0,1fr)}.deps .scroll{border-right:0;order:2}.man{order:1;border-bottom:1px solid var(--line);border-radius:0;z-index:2}}
+
+/* The listings: a name, then what it does as a comment. */
+.find{flex:1 1 12ch;min-width:10ch;max-width:30ch;background:transparent;border:0;border-bottom:1px dashed var(--dim);color:var(--ink);font:inherit;padding:0 .3ch;margin:0 .6ch}
+.find::placeholder{color:var(--dim)}
+ul.rows{list-style:none;margin:0;padding:.4rem 0}
+.item{display:grid;grid-template-columns:25ch minmax(0,1fr);gap:0 2ch;padding:.12rem .9rem}
+.item:hover{background:var(--raised)}
+.nm{color:var(--k);font-weight:600;overflow-wrap:anywhere}
+.k-skill .nm::before{content:"/";opacity:.6}
+.nm em{font-style:normal;font-weight:400;color:var(--dim)}
+.nm em::before{content:"@"}
+.co{color:var(--routine);font-weight:400;margin-left:1ch}
+.ds{color:var(--dim)}
+.ds::before{content:"# ";opacity:.6}
+.none{color:var(--dim);margin:0;padding:.4rem .9rem}
+@media (max-width:620px){.item{grid-template-columns:minmax(0,1fr);padding-block:.35rem}}
+/* A listing comes in line by line when it scrolls into view. With no script, each line is there from the start. */
+.grid.in .item,.grid.in .log{animation:rise .4s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(var(--i)*28ms)}
+@keyframes rise{from{opacity:0;transform:translateX(-10px)}}
+
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:640px;font-family:var(--body);font-size:.88rem;line-height:1.5}
+td,th{text-align:left;padding:.6rem .9rem;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
-th{font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
-.mono{font-family:var(--mono);font-size:.82rem;white-space:nowrap}
-code{font-family:var(--mono);font-size:.86em}
-.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.6rem;list-style:none;margin:0;padding:0}
-.rules li{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;font-size:.9rem}
-.rules b{display:block;font-family:var(--mono);font-size:.82rem;color:var(--ok);margin-bottom:.15rem}
-footer{margin-top:3rem;color:var(--muted);font-size:.82rem}
+th{font-family:var(--mono);font-size:.74rem;color:var(--dim);font-weight:500}
+td{color:var(--dim)}
+td.kind{font-family:var(--mono);font-weight:600;font-size:.84rem;color:var(--k,var(--ink));white-space:nowrap}
+.rule{margin:1.2rem 0 0;font-family:var(--display);font-weight:500;font-size:clamp(1.15rem,2.6vw,1.5rem);line-height:1.3;letter-spacing:-.01em;max-width:32ch;text-wrap:balance}
+.rule b:nth-of-type(1){color:var(--skill)}.rule b:nth-of-type(2){color:var(--mod)}.rule b:nth-of-type(3){color:var(--routine)}
+footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76rem}
+@media (prefers-reduced-motion:reduce){.cur,.ln.st,.log.next,.grid.in .item,.grid.in .log,.graph.sel .ed.on{animation:none}}
 </style>
 <div class="wrap">
 <header>
+<p class="eyebrow"><b>$</b>setup-map --state @@DATE@@<i class="cur"></i></p>
 <h1>Setup Map</h1>
-<p class="lede">Everything in the Claude Code config of this computer: N_SKILLS skills, N_MODS mods, N_ROUT routines, N_EXTRA scripts and agents, and the six flows that tie them together. State of STATE_DATE.</p>
+<p class="lede">Everything in the Claude Code config of this computer, and the <b>@@N_FLOWS@@ flows</b> that tie the parts together. Each section is a command and its output. The same color marks a kind of part in every section.</p>
 <div class="stats">
-<div class="stat"><b>N_SKILLS</b><span>skills</span></div>
-<div class="stat"><b>N_MODS</b><span>mods</span></div>
-<div class="stat"><b>N_ROUT</b><span>routines</span></div>
-<div class="stat"><b>N_EXTRA</b><span>scripts and agents</span></div>
-<div class="stat"><b>6</b><span>flows</span></div>
-<div class="stat"><b>N_RULES</b><span>safeguards</span></div>
+<div class="stat"><b>@@N_SKILLS@@</b><span>skills</span></div>
+<div class="stat"><b>@@N_MODS@@</b><span>mods</span></div>
+<div class="stat"><b>@@N_ROUT@@</b><span>routines</span></div>
+<div class="stat"><b>@@N_EXTRA@@</b><span>scripts and agents</span></div>
+<div class="stat"><b>@@N_FLOWS@@</b><span>flows</span></div>
+<div class="stat"><b>@@N_RULES@@</b><span>safeguards</span></div>
 </div>
 </header>
-<nav aria-label="Sections"><a href="#fit">How it fits</a><a href="#kinds">What is what</a><a href="#flows">Flows</a><a href="#skills">Skills</a><a href="#mods">Mods</a><a href="#routines">Routines</a><a href="#rules">Safeguards</a></nav>
+<nav aria-label="Sections"><a href="#fit">tree</a><a href="#kinds">kinds</a><a href="#flows">flows</a><a href="#routines">log</a><a href="#graph-s">graph</a><a href="#skills">skills</a><a href="#mods">mods</a><a href="#scripts">scripts</a><a href="#rules">guards</a></nav>
 
 <section id="fit">
-<h2>How it fits</h2>
-<p class="sub">Four kinds of part sit in <code>~/.claude</code>. Claude Code reads them in the app, the CLI and the scheduled runs. Parts marked "company" know one product; all others work in any project.</p>
-<div class="diagram">
-<svg viewBox="0 0 900 300" role="img" aria-label="Skills, mods, routines and scripts sit in the .claude folder, which Claude Code reads.">
-<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor" style="color:var(--muted)"/></marker></defs>
-<rect class="box" x="10" y="15" width="240" height="60" rx="10"/><text class="t" x="26" y="40">Skills · N_SKILLS</text><text class="m" x="26" y="60">typed as a slash command</text>
-<rect class="box" x="10" y="85" width="240" height="60" rx="10"/><text class="t" x="26" y="110">Mods · N_MODS</text><text class="m" x="26" y="130">panes, themes, hooks</text>
-<rect class="box" x="10" y="155" width="240" height="60" rx="10"/><text class="t" x="26" y="180">Routines · N_ROUT</text><text class="m" x="26" y="200">prompts on a schedule</text>
-<rect class="box" x="10" y="225" width="240" height="60" rx="10"/><text class="t" x="26" y="250">Scripts + agent · N_EXTRA</text><text class="m" x="26" y="270">memory, merge, status line</text>
-<rect class="hot" x="350" y="70" width="200" height="150" rx="12"/><text class="t" x="372" y="105">~/.claude</text><text class="m" x="372" y="128">settings, output style</text><text class="m" x="372" y="148">profile rules, ticket sources</text><text class="m" x="372" y="168">merge-policy rules</text><text class="m" x="372" y="188">mods load in place</text>
-<rect class="box" x="650" y="70" width="240" height="150" rx="12"/><text class="t" x="672" y="105">Claude Code</text><text class="m" x="672" y="128">desktop app</text><text class="m" x="672" y="148">terminal CLI</text><text class="m" x="672" y="168">scheduled runs</text><text class="m" x="672" y="188">lane sessions and agents</text>
-<path class="arr" d="M250 45 L348 120"/><path class="arr" d="M250 115 L348 135"/><path class="arr" d="M250 185 L348 160"/><path class="arr" d="M250 255 L348 190"/><path class="arr" d="M550 145 L648 145"/>
-</svg>
-</div>
+<div class="head"><h2>How it fits</h2></div>
+<p class="sub">Four kinds of part sit in one folder. Parts marked <code>[company]</code> know one product. All others work in any project.</p>
+<div class="term"><div class="cmd"><b>$</b>tree -L 1 ~/.claude</div><div class="scroll"><pre class="out">@@TREE@@</pre></div></div>
 </section>
 
 <section id="kinds">
-<h2>What is what</h2>
-<p class="sub">Six kinds of part. They differ in who starts them and in what they can force. A skill gives advice. A mod enforces a rule. A routine runs alone.</p>
-<div class="tablewrap"><table><thead><tr><th>Kind</th><th>What it is</th><th>Who starts it</th><th>Can it force something?</th><th>Example</th></tr></thead><tbody>
-<tr><td class="mono">Skill</td><td>A text file of steps. Claude reads it and follows it.</td><td>You, with a slash command, or the skill router when your words match.</td><td>No. It is advice. Claude can skip a step.</td><td><code>/merge-when-green</code></td></tr>
-<tr><td class="mono">Mod</td><td>Code that runs inside the app. It hooks events: a prompt, a tool call, a new session, the screen.</td><td>The app, at each event. Nobody asks Claude.</td><td>Yes. It can block a tool call, change a prompt, draw a pane, start a turn.</td><td><code>ci-watch</code> blocks polling loops</td></tr>
-<tr><td class="mono">Routine</td><td>A prompt that runs on a schedule, with nobody watching. It is a scheduled task.</td><td>The clock, or a manual run with <code>/autonomy run</code>.</td><td>Only what its rules and the kill switch allow. It stops on doubt.</td><td><code>morning-prep</code> at 07:30</td></tr>
-<tr><td class="mono">Script</td><td>A shell file that does one exact job with no thinking.</td><td>A skill, a routine or you.</td><td>Yes, in its own job only.</td><td><code>autonomy.sh</code> (kill switch)</td></tr>
-<tr><td class="mono">Agent</td><td>A helper session for one part of a task, with its own model and effort.</td><td>A skill or Claude, in the background.</td><td>No. It reports back. Claude checks the result.</td><td>A reviewer of a sub-branch</td></tr>
-<tr><td class="mono">Profile</td><td>A private layer on top of the public core. It holds company and product rules.</td><td>The installer. It links the files into <code>~/.claude</code>.</td><td>Sets the rules that all other parts follow.</td><td>Product skills and the merge policy</td></tr>
-</tbody></table></div>
-<p class="sub" style="margin-top:1rem">A simple rule: use a skill for a procedure, a mod for a rule that must always hold, and a routine for work that must happen without you.</p>
+<div class="head"><h2>What is what</h2></div>
+<p class="sub">Six kinds of part. They differ in who starts them and in what they can force.</p>
+<div class="term"><div class="cmd"><b>$</b>cat KINDS.md</div><div class="tablewrap"><table><thead><tr><th>kind</th><th>what it is</th><th>who starts it</th><th>can it force something?</th><th>example</th></tr></thead><tbody>
+<tr><td class="kind k-skill">Skill</td><td>A text file of steps. Claude reads it and follows it.</td><td>You, with a slash command, or the skill router when your words match.</td><td>No. It is advice. Claude can skip a step.</td><td><code>/merge-when-green</code></td></tr>
+<tr><td class="kind k-mod">Mod</td><td>Code that runs inside the app. It hooks events: a prompt, a tool call, a new session, the screen.</td><td>The app, at each event. Nobody asks Claude.</td><td>Yes. It can block a tool call, change a prompt, draw a pane, start a turn.</td><td><code>ci-watch</code> blocks polling loops</td></tr>
+<tr><td class="kind k-routine">Routine</td><td>A prompt that runs on a schedule, with nobody watching. It is a scheduled task.</td><td>The clock, or a manual run with <code>/autonomy run</code>.</td><td>Only what its rules and the kill switch allow. It stops on doubt.</td><td><code>morning-prep</code> at 07:30</td></tr>
+<tr><td class="kind k-script">Script</td><td>A shell file that does one exact job with no thinking.</td><td>A skill, a routine or you.</td><td>Yes, in its own job only.</td><td><code>claims.sh</code> (one owner for a ticket)</td></tr>
+<tr><td class="kind">Agent</td><td>A helper session for one part of a task, with its own model and effort.</td><td>A skill or Claude, in the background.</td><td>No. It reports back. Claude checks the result.</td><td>A reviewer of a sub-branch</td></tr>
+<tr><td class="kind">Profile</td><td>A private layer on top of the public core. It holds company and product rules.</td><td>The installer. It links the files into <code>~/.claude</code>.</td><td>Sets the rules that all other parts follow.</td><td>Product skills and the merge policy</td></tr>
+</tbody></table></div></div>
+<p class="rule">Use a <b>skill</b> for a procedure, a <b>mod</b> for a rule that must always hold, and a <b>routine</b> for work that must happen without you.</p>
 </section>
 
 <section id="flows">
-<h2>The flows</h2>
-<p class="sub">Each flow is a loop: a routine, an event or a manual run starts it, and a person is asked only at a gate. Each box is a skill, a mod or a routine from the lists below.</p>
+<div class="head"><h2>The flows</h2><span class="n">@@N_FLOWS@@ loops</span></div>
+<p class="sub">Each flow is a loop. It runs while the kill switch is off, and a person is asked only at a gate. The lit line is the step that the loop is at.</p>
 <div class="flows">
-FLOWS
+@@FLOWS@@
 </div>
-</section>
-
-<section id="skills">
-<h2>Skills</h2>
-<p class="sub">Typed as a slash command, or picked by the skill router from your words.</p>
-<input class="find" id="f1" type="search" placeholder="Find a skill or a mod" aria-label="Find a skill or a mod">
-<ul class="grid">
-SKILLS
-</ul>
-</section>
-
-<section id="mods">
-<h2>Mods</h2>
-<p class="sub">Small plugins that change the app: panes, themes, hooks on tool calls. A change to one shows after <code>/reload-plugins</code>.</p>
-<ul class="grid">
-MODS
-</ul>
 </section>
 
 <section id="routines">
-<h2>Routines</h2>
-<p class="sub">Prompts that run on a schedule with nobody watching. Each is a scheduled task.</p>
-<div class="tablewrap"><table><thead><tr><th>When</th><th>Routine</th><th>What it does</th></tr></thead><tbody>
-ROUTINES
-</tbody></table></div>
-<h3 style="margin-top:1.6rem">Scripts and agent</h3>
-<ul class="grid">
-EXTRAS
+<div class="head"><h2>The day of the loops</h2><span class="n" id="nextrun">@@N_ROUT@@ routines</span></div>
+<p class="sub">Each scheduled run of the day, in local time. A time that is past is dim. The log does not know if that run was successful: it reads only the schedule.</p>
+<div class="term"><div class="cmd"><b>$</b>tail -f ~/.claude/loops.log<span class="hint" id="clock"></span></div>
+<ul class="logs grid">
+@@CRON@@
 </ul>
+<div class="tail"><i class="cur"></i></div></div>
+</section>
+
+<section id="graph-s">
+<div class="head"><h2>How the parts connect</h2><span class="n">@@N_EDGES@@ calls</span></div>
+<p class="sub">A part calls another part when its own files name it. An arc is one call, in the color of the part that makes it. Select a part to see what it does, what it calls and what calls it.</p>
+<div class="term"><div class="cmd"><b>$</b>grep -rl ~/.claude | deps --graph</div><div class="deps">
+<div class="scroll">
+@@GRAPH@@
+</div>
+<div class="man" id="man" aria-live="polite"><h4>NAME</h4><p class="nil">Select a part in the graph.</p></div>
+</div></div>
+<script type="application/json" id="gdata">@@GDATA@@</script>
+</section>
+
+<section id="skills">
+<div class="head"><h2>Skills</h2><span class="n">@@N_SKILLS@@ skills</span></div>
+<p class="sub">Typed as a slash command, or picked by the skill router from your words. The search also reads the mods and the scripts.</p>
+<div class="term"><label class="cmd" for="f1"><b>$</b>ls ~/.claude/skills | grep -i<input class="find" id="f1" type="search" placeholder="text" aria-label="Find a skill, a mod or a script"></label>
+<p class="none" id="none" hidden># no line has that text</p>
+<ul class="rows grid k-skill">
+@@SKILLS@@
+</ul></div>
+</section>
+
+<section id="mods">
+<div class="head"><h2>Mods</h2><span class="n">@@N_MODS@@ mods</span></div>
+<p class="sub">Small plugins that change the app: panes, themes, hooks on tool calls. A change to one shows after <code>/reload-plugins</code>.</p>
+<div class="term"><div class="cmd"><b>$</b>claude plugin list</div>
+<ul class="rows grid k-mod">
+@@MODS@@
+</ul></div>
+</section>
+
+<section id="scripts">
+<div class="head"><h2>Scripts and agents</h2><span class="n">@@N_EXTRA@@ helpers</span></div>
+<p class="sub">Shell files that do one exact job, and the helper agents. Skills and routines call them.</p>
+<div class="term"><div class="cmd"><b>$</b>ls ~/.claude/*.sh ~/.claude/agents</div>
+<ul class="rows grid k-script">
+@@EXTRAS@@
+</ul></div>
 </section>
 
 <section id="rules">
-<h2>Safeguards</h2>
+<div class="head"><h2>Safeguards</h2><span class="n">@@N_RULES@@ rules</span></div>
 <p class="sub">What keeps the config safe to change often.</p>
-<ul class="rules">
-RULES
-</ul>
+<div class="term"><div class="cmd"><b>$</b>cat ~/.claude/guards</div>
+<ul class="rows k-script">
+@@RULES@@
+</ul></div>
 </section>
-<footer>Model claude-opus-5-5 at medium effort · output style ASD-STE100 · 18 plugins enabled by the config · company parts are marked and are the only ones that name a product.</footer>
+<footer># @@FOOTER@@</footer>
 </div>
 <script>
-(function(){var f=document.getElementById('f1');if(!f)return;f.addEventListener('input',function(){var q=f.value.trim().toLowerCase();document.querySelectorAll('#skills .item,#mods .item').forEach(function(el){el.hidden=q!==''&&(el.getAttribute('data-k')||'').indexOf(q)<0})})})();
+(function(){
+  var f=document.getElementById('f1'),none=document.getElementById('none');
+  if(f)f.addEventListener('input',function(){
+    var q=f.value.trim().toLowerCase(),n=0;
+    document.querySelectorAll('ul.grid .item').forEach(function(el){var off=q!==''&&(el.getAttribute('data-k')||'').indexOf(q)<0;el.hidden=off;if(!off)n++});
+    if(none)none.hidden=n>0;
+  });
+  // The log on the real clock: each line is past, next (with the time left), later, or not today.
+  var runs=[].slice.call(document.querySelectorAll('.log')),nr=document.getElementById('nextrun'),clock=document.getElementById('clock');
+  function runsOn(f,day){if(f==='*')return true;if(f==='1-5')return day>=1&&day<=5;if(/^[0-7]$/.test(f))return(+f%7)===day;return true}
+  function left(min){var h=Math.floor(min/60),m=min%60;return 'in '+(h?h+'h ':'')+m+'m'}
+  function two(n){return('0'+n).slice(-2)}
+  function tick(){
+    var d=new Date(),m=d.getHours()*60+d.getMinutes(),day=d.getDay(),best=null,off=0;
+    for(;off<8&&!best;off++)runs.forEach(function(r){var rm=+r.getAttribute('data-m');
+      if(runsOn(r.getAttribute('data-d'),(day+off)%7)&&(off>0||rm>m)&&(!best||rm<+best.getAttribute('data-m')))best=r});
+    off--;
+    runs.forEach(function(r){
+      var rm=+r.getAttribute('data-m'),st=r.querySelector('.st'),today=runsOn(r.getAttribute('data-d'),day),state;
+      if(r===best)state='next';else if(!today)state='off';else if(rm<=m)state='past';else state='later';
+      r.className='log '+state;
+      st.textContent=state==='off'?'not today':state==='past'?'past':state==='later'?'later':(off===0?left(rm-m):off===1?'tomorrow':'in '+off+' days');
+    });
+    if(clock)clock.textContent='now '+two(d.getHours())+':'+two(d.getMinutes());
+    if(best&&nr){var bm=+best.getAttribute('data-m');nr.textContent='next: ';var b=document.createElement('b');b.textContent=best.getAttribute('data-n');nr.appendChild(b);
+      nr.appendChild(document.createTextNode(' at '+two(Math.floor(bm/60))+':'+two(bm%60)+(off===0?'':off===1?' tomorrow':' in '+off+' days')))}
+  }
+  tick();setInterval(tick,30000);
+  // The call graph: one part is chosen. Its arcs and the parts at the other end of them are lit, and the man page says what it does.
+  var G=null,svg=document.getElementById('graph'),man=document.getElementById('man');
+  try{G=JSON.parse(document.getElementById('gdata').textContent)}catch(x){}
+  function add(tag,cls,text,to){var el=document.createElement(tag);if(cls)el.className=cls;if(text)el.textContent=text;to.appendChild(el);return el}
+  function names(title,list){
+    add('h4','',title,man);
+    if(!list.length){add('p','nil','none',man);return}
+    var box=add('div','list',null,man);
+    list.forEach(function(id){var b=add('button','k-'+G.n[id][0],id,box);b.type='button';b.addEventListener('click',function(){pick(id)})});
+  }
+  function pick(id){
+    if(!G||!svg||!G.n[id])return;
+    var out=[],inn=[];
+    G.e.forEach(function(ed){if(ed[0]===id)out.push(ed[1]);if(ed[1]===id)inn.push(ed[0])});
+    svg.classList.add('sel');
+    [].forEach.call(svg.querySelectorAll('.ed'),function(p){p.classList.toggle('on',p.getAttribute('data-s')===id||p.getAttribute('data-t')===id)});
+    [].forEach.call(svg.querySelectorAll('.nd'),function(n){var k=n.getAttribute('data-id');n.classList.toggle('me',k===id);n.classList.toggle('on',k===id||out.indexOf(k)>=0||inn.indexOf(k)>=0)});
+    man.textContent='';
+    add('h4','','NAME',man);var p=add('p','',null,man);add('b','kc k-'+G.n[id][0],id,p);add('span','com','  ('+G.n[id][0]+')',p);
+    add('h4','','WHAT IT DOES',man);add('p','',G.n[id][1]||'No description.',man);
+    names('CALLS',out);names('CALLED BY',inn);
+  }
+  if(G&&svg){
+    [].forEach.call(svg.querySelectorAll('.nd'),function(n){var id=n.getAttribute('data-id');
+      n.addEventListener('click',function(){pick(id)});n.addEventListener('mouseenter',function(){pick(id)});
+      n.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pick(id)}})});
+    var most={},top=null;G.e.forEach(function(ed){most[ed[0]]=(most[ed[0]]||0)+1});
+    Object.keys(most).forEach(function(k){if(G.n[k][0]==='skill'&&(!top||most[k]>most[top]))top=k});
+    if(top)pick(top);
+  }
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}})},{rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('ul.grid').forEach(function(g){[].forEach.call(g.children,function(el,i){el.style.setProperty('--i',i)});io.observe(g)});
+  }
+})();
 </script>
-'''
+"""
 import datetime
-page = page.replace('N_SKILLS', str(N_SKILLS)).replace('N_MODS', str(N_MODS)).replace('N_ROUT', str(N_ROUT)).replace('N_EXTRA', str(N_EXTRA)).replace('N_RULES', str(len(rules))).replace('STATE_DATE', datetime.date.today().isoformat())
-page = page.replace('FLOWS', flows_html).replace('SKILLS', skills_html).replace('MODS', mods_html).replace('ROUTINES', routines_html).replace('EXTRAS', extras_html).replace('RULES', rules_html)
-open(OUT, 'w').write(page)
+for k, v in (('N_SKILLS', N_SKILLS), ('N_MODS', N_MODS), ('N_ROUT', N_ROUT), ('N_EXTRA', N_EXTRA), ('N_RULES', len(rules)), ('N_FLOWS', len(flows)),
+             ('DATE', datetime.date.today().isoformat()), ('TREE', tree_html), ('GRAPH', graph_html), ('GDATA', graph_data), ('N_EDGES', N_EDGES), ('FLOWS', flows_html), ('CRON', cron_html),
+             ('SKILLS', skills_html), ('MODS', mods_html), ('EXTRAS', extras_html), ('RULES', rules_html), ('FOOTER', footer_html)):
+    page = page.replace('@@%s@@' % k, str(v))
+open(OUT, 'w', encoding='utf-8').write(page)
 PY_END
 echo "$out"
