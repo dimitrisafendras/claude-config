@@ -44,6 +44,7 @@ Remove dead worktrees and archive finished sessions. Never lose work, and say wh
    - It runs `git worktree remove` (never `--force`).
    - It deletes the local branch only when it is merged.
    - It prunes stale worktree records.
+   - Then run `bash ~/.claude/claims.sh prune`. It removes the claims that expired, so a ticket of a dead lane is free again. It never removes a live claim.
 3. **Sessions:**
    - Call `mcp__ccd_session_mgmt__list_sessions` with `limit: 100`.
    - Archive with `mcp__ccd_session_mgmt__archive_session`, giving a short reason (e.g. "PR #123 merged"), each session that is not running and either:

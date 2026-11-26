@@ -2,6 +2,15 @@
 
 Read this when a lane starts, when `ci-watch` wakes a lane, and when `/autonomy run lane <ticket>` runs. Each stage ends in the next stage or in `needs-you`. The kill switch (`~/.claude/autonomy.off`) is checked first: `bash ~/.claude/autonomy.sh check` (exit non-zero = stop).
 
+## The claim
+
+A ticket has one owner at a time, across all sessions of this computer (a morning loop, a manual `/start-work`, a lane, a person). The claim is the lock: `bash ~/.claude/claims.sh` (`claim`, `heartbeat`, `release`, `check`, `list`). The key is `<board>:<ticket>`, for example `my-app:TICKET-123`. The owner is the name of this lane session.
+
+- **Stage 0, before any edit:** `bash ~/.claude/claims.sh claim <board>:<ticket> --owner <lane name> --note "<ticket title>"`. When the coordinator started this lane, it already holds the claim for this owner: the call renews it. Exit 1 means another session owns the ticket. Stop, work on nothing, and report "claimed by <owner>" in one line. Do not take the claim by force.
+- **At each stage change:** the same time that the lane writes `next`, run `claims.sh heartbeat <key> --owner <lane name>`. A claim ends after 4 hours without a heartbeat, so a dead lane frees its ticket by itself. A heartbeat that fails (exit 1) means the claim went to another session: stop and report it.
+- **At the end** (`done` or `needs-you`): `claims.sh release <key> --owner <lane name>`. The ticket state, not the claim, then keeps a `needs-you` ticket from a new start.
+- Another computer does not see this folder. There the status `in progress` of the ticket is the signal.
+
 ## The stages
 
 1. **Work.** Agents on sub-branches, reviewer per sub-branch, the lane check (`keep-it-running.md`, 6).

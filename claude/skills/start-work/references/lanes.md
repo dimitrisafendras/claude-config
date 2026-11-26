@@ -10,6 +10,10 @@ Read this when stage 4 has two or more lanes.
 
 A web lane (dev server) and a mobile lane (simulator, Metro) are heavy. A backend, library or docs lane without a dev server is light: two light lanes count as one heavy lane.
 
+## Claim before you start
+
+For each row of the lane, run `bash ~/.claude/claims.sh claim <board>:<ticket> --owner <lane name> --note "<title>"` before `start_session`. The key is the board name of the extra source file and the ticket id. A row that returns exit 1 is not in the lane: another session owns it. Name that owner in the plan and start the lane with the other rows. If `start_session` fails, release the claims of that lane at once. The lane renews each claim with a heartbeat and releases it at the end (`paralel`, `lane-loop.md`, "The claim").
+
 ## Start each lane
 
 Use `mcp__ccd_session__start_session` with:

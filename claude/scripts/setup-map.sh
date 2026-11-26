@@ -27,7 +27,7 @@ OUT = os.environ['SM_OUT']
 
 flows = [
  ("Start the day",[("07:30","morning-prep loop"),("config sync","pull + install when clean"),("inbox + plan","tickets, ranked"),("/paralel","starts the free tickets"),("08:15","daily-digest")]),
- ("Do the work",[("lane","one session for each ticket"),("agents","sub-branches, a reviewer each"),("ci-watch","fix red CI, up to 3 tries"),("merge","on green, by the merge policy"),("needs you","a decision record, never a wait")]),
+ ("Do the work",[("claim","one owner for each ticket, in all sessions"),("lane","one session for each ticket"),("agents","sub-branches, a reviewer each"),("ci-watch","fix red CI, up to 3 tries"),("merge","on green, by the merge policy"),("needs you","a decision record, never a wait")]),
  ("After the merge",[("deploy watch","the run of the merge commit"),("verify","staging, with evidence"),("ticket-closer","close the ticket"),("cleanup","worktree and branch, at once")]),
  ("Keep it clean",[("12:00","sweep: repair stale PRs"),("03:00","config-loop: pull, install, audit"),("02:30","nightly-cleanup"),("19:00","prefs-sync"),("Monday","audit and releases digest")]),
  ("Change the setup",[("edit","main checkout, dev branch"),("/reload-plugins","look, repeat"),("one PR","CI must pass"),("merge on green","auto-merge"),("pull + install","install.sh --mods")]),
@@ -37,6 +37,7 @@ rules = [
  ("kill switch","The file ~/.claude/autonomy.off stops every loop at its next step. /autonomy off and on set it."),
  ("3 tries","A fix is tried at most 3 times for a PR; then the ticket needs you, with a decision record."),
  ("manual gates","A production release, a message to other people, money, secrets and destructive data stay yours."),
+ ("ticket claims","A ticket has one owner at a time, across all sessions. A claim ends after 4 hours with no heartbeat."),
  ("decision records","A question, two options, a default and a deadline. A reversible one takes its default at the deadline."),
  ("merge-policy","A rule file says which repos allow a merge with no prompt."),
  ("verify-gate","A lane cannot finish while its check command fails."),
