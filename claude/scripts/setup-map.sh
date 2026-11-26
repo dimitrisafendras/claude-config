@@ -168,10 +168,10 @@ def read_all(paths):
     return "\n".join(out)
 def skill_ref(n): return re.compile(r'(?:(?<![\w./-])/|`/?)' + re.escape(n) + r'(?![\w-])(?!\.\w)')
 def mod_ref(n): return re.compile(r'`' + re.escape(n) + r'`|mcp__' + re.escape(n) + r'__')
-kind_of, about = {}, {}
-for n, d, c in skills: kind_of[n] = 'skill'; about[n] = d
+kind_of, about, co_of = {}, {}, {}
+for n, d, c in skills: kind_of[n] = 'skill'; about[n] = d; co_of[n] = c
 for n, v, d, c in mods:
-    if n not in kind_of: kind_of[n] = 'mod'; about[n] = d
+    if n not in kind_of: kind_of[n] = 'mod'; about[n] = d; co_of[n] = c
 for first, crons, n, d in routines:
     if n not in kind_of: kind_of[n] = 'routine'; about[n] = d
 for n, d in extras:
@@ -204,7 +204,7 @@ for n in g_nodes:
     gs.append('<g class="nd k-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="hitbox" x="0" y="%d" width="%d" height="%d"/><text x="%d" y="%d" text-anchor="end">%s</text><circle cx="%d" cy="%d" r="3.6"/></g>' % (kind_of[n], e(n), e(n), gy[n] - 9, GX + 10, ROW, GX - 12, gy[n] + 4, e(n), GX, gy[n]))
 gs.append('</svg>')
 graph_html = "\n".join(gs)
-graph_data = json.dumps({'n': {n: [kind_of[n], about.get(n, '')] for n in g_nodes}, 'e': sorted([a, b] for a, b in edges if a in gy and b in gy)}).replace('</', '<\\/')
+graph_data = json.dumps({'x': GX, 'row': ROW, 'w': GW, 'n': {n: [kind_of[n], about.get(n, ''), 1 if co_of.get(n) else 0] for n in g_nodes}, 'e': sorted([a, b] for a, b in edges if a in gy and b in gy)}).replace('</', '<\\/')
 N_EDGES = sum(1 for a, b in edges if a in gy and b in gy)
 
 # ---- the footer facts come from the settings of the repo, when they are there ----
@@ -301,6 +301,12 @@ ul.logs{list-style:none;margin:0;padding:.5rem 0}
 .tail{padding:0 .9rem .6rem;color:var(--dim)}
 @media (max-width:700px){.log{grid-template-columns:6ch minmax(0,1fr) auto}.log .com{grid-column:2/-1}}
 
+/* The filters of the graph: a flag for each kind of part. A flag that is off has a line through it. */
+.flags{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem 1.8ch;padding:.45rem .9rem;border-bottom:1px solid var(--line)}
+.flags button{font:inherit;font-weight:600;color:var(--k,var(--ink));background:none;border:0;padding:0;cursor:pointer}
+.flags button[aria-pressed="false"]{color:var(--dim);font-weight:400;text-decoration:line-through}
+.flags button:focus-visible{outline:2px solid var(--skill);outline-offset:2px}
+.flags .com{margin-left:auto}
 /* The call graph: the parts down one line, an arc for each call. The chosen part and its calls are lit. */
 .deps{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}
 .deps .scroll{border-right:1px solid var(--line);padding:.6rem .4rem}
@@ -417,8 +423,12 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
 
 <section id="graph-s">
 <div class="head"><h2>How the parts connect</h2><span class="n">@@N_EDGES@@ calls</span></div>
-<p class="sub">A part calls another part when its own files name it. An arc is one call, in the color of the part that makes it. Select a part to see what it does, what it calls and what calls it.</p>
-<div class="term"><div class="cmd"><b>$</b>grep -rl ~/.claude | deps --graph</div><div class="deps">
+<p class="sub">A part calls another part when its own files name it. An arc is one call, in the color of the part that makes it. Select a part to see what it does, what it calls and what calls it. To remove parts, type a part of their name after <code>grep -v</code> (some words with a space between them remove more), or set a flag to off.</p>
+<div class="term"><label class="cmd" for="f2"><b>$</b>deps --graph | grep -v<input class="find" id="f2" type="search" placeholder="text" aria-label="Hide the parts whose name has this text"></label>
+<div class="flags" id="flags" role="group" aria-label="Kinds of part in the graph">
+<button type="button" class="k-routine" data-f="routine" aria-pressed="true">--routines</button><button type="button" class="k-skill" data-f="skill" aria-pressed="true">--skills</button><button type="button" class="k-mod" data-f="mod" aria-pressed="true">--mods</button><button type="button" class="k-script" data-f="script" aria-pressed="true">--scripts</button><button type="button" data-f="company" aria-pressed="true">--company</button>
+<span class="com" id="gcount"></span></div>
+<div class="deps">
 <div class="scroll">
 @@GRAPH@@
 </div>
@@ -504,25 +514,57 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
     var box=add('div','list',null,man);
     list.forEach(function(id){var b=add('button','k-'+G.n[id][0],id,box);b.type='button';b.addEventListener('click',function(){pick(id)})});
   }
+  var vis={},cur=null,off={},f2=document.getElementById('f2'),flags=document.getElementById('flags'),gcount=document.getElementById('gcount'),nds=[],eds=[],y0={};
   function pick(id){
-    if(!G||!svg||!G.n[id])return;
-    var out=[],inn=[];
-    G.e.forEach(function(ed){if(ed[0]===id)out.push(ed[1]);if(ed[1]===id)inn.push(ed[0])});
+    if(!G||!svg||!G.n[id]||!vis[id])return;
+    cur=id;var out=[],inn=[];
+    G.e.forEach(function(ed){if(!vis[ed[0]]||!vis[ed[1]])return;if(ed[0]===id)out.push(ed[1]);if(ed[1]===id)inn.push(ed[0])});
     svg.classList.add('sel');
-    [].forEach.call(svg.querySelectorAll('.ed'),function(p){p.classList.toggle('on',p.getAttribute('data-s')===id||p.getAttribute('data-t')===id)});
-    [].forEach.call(svg.querySelectorAll('.nd'),function(n){var k=n.getAttribute('data-id');n.classList.toggle('me',k===id);n.classList.toggle('on',k===id||out.indexOf(k)>=0||inn.indexOf(k)>=0)});
+    eds.forEach(function(p){p.classList.toggle('on',p.getAttribute('data-s')===id||p.getAttribute('data-t')===id)});
+    nds.forEach(function(n){var k=n.getAttribute('data-id');n.classList.toggle('me',k===id);n.classList.toggle('on',k===id||out.indexOf(k)>=0||inn.indexOf(k)>=0)});
     man.textContent='';
     add('h4','','NAME',man);var p=add('p','',null,man);add('b','kc k-'+G.n[id][0],id,p);add('span','com','  ('+G.n[id][0]+')',p);
     add('h4','','WHAT IT DOES',man);add('p','',G.n[id][1]||'No description.',man);
     names('CALLS',out);names('CALLED BY',inn);
   }
+  // The part with the most calls among the parts that stay: a skill first, else any part.
+  function busiest(){
+    var most={},top=null,any=null;
+    G.e.forEach(function(ed){if(vis[ed[0]]&&vis[ed[1]])most[ed[0]]=(most[ed[0]]||0)+1});
+    Object.keys(most).forEach(function(k){if(!any||most[k]>most[any])any=k;if(G.n[k][0]==='skill'&&(!top||most[k]>most[top]))top=k});
+    return top||any||Object.keys(vis)[0]||null;
+  }
+  // Hide the parts that the filters remove, move the others up, and draw each arc again between the new places.
+  function layout(){
+    var terms=(f2?f2.value:'').toLowerCase().split(/[\s,]+/).filter(Boolean),y=16,calls=0,parts=0;
+    vis={};
+    nds.forEach(function(n){
+      var id=n.getAttribute('data-id'),d=G.n[id],hide=!!off[d[0]]||(d[2]&&off.company)||terms.some(function(t){return id.toLowerCase().indexOf(t)>=0});
+      n.style.display=hide?'none':'';
+      if(!hide){vis[id]=y;n.setAttribute('transform','translate(0 '+(y-y0[id])+')');y+=G.row;parts++}
+    });
+    eds.forEach(function(p){
+      var a=vis[p.getAttribute('data-s')],b=vis[p.getAttribute('data-t')];
+      if(!a||!b){p.style.display='none';return}
+      var dd=Math.abs(b-a);calls++;p.style.display='';
+      p.setAttribute('d','M'+G.x+' '+a+' A'+Math.min(320,24+dd*.42).toFixed(0)+' '+(dd/2).toFixed(1)+' 0 0 '+(b>a?1:0)+' '+G.x+' '+b);
+    });
+    svg.setAttribute('viewBox','0 0 '+G.w+' '+Math.max(y,40));
+    if(gcount)gcount.textContent='# '+parts+' parts, '+calls+' calls';
+    if(cur&&vis[cur])pick(cur);else{var t=busiest();if(t)pick(t);else{svg.classList.remove('sel');man.textContent='';add('h4','','NAME',man);add('p','nil','No part is left. Remove a filter.',man)}}
+    try{localStorage.setItem('setup-map-graph',JSON.stringify({off:off,text:f2?f2.value:''}))}catch(x){}
+  }
   if(G&&svg){
-    [].forEach.call(svg.querySelectorAll('.nd'),function(n){var id=n.getAttribute('data-id');
+    nds=[].slice.call(svg.querySelectorAll('.nd'));eds=[].slice.call(svg.querySelectorAll('.ed'));
+    nds.forEach(function(n){var id=n.getAttribute('data-id');y0[id]=+n.querySelector('circle').getAttribute('cy');
       n.addEventListener('click',function(){pick(id)});n.addEventListener('mouseenter',function(){pick(id)});
       n.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pick(id)}})});
-    var most={},top=null;G.e.forEach(function(ed){most[ed[0]]=(most[ed[0]]||0)+1});
-    Object.keys(most).forEach(function(k){if(G.n[k][0]==='skill'&&(!top||most[k]>most[top]))top=k});
-    if(top)pick(top);
+    try{var saved=JSON.parse(localStorage.getItem('setup-map-graph')||'null');if(saved){off=saved.off||{};if(f2&&typeof saved.text==='string')f2.value=saved.text}}catch(x){off={}}
+    if(flags)[].forEach.call(flags.querySelectorAll('button'),function(b){var k=b.getAttribute('data-f');
+      b.setAttribute('aria-pressed',off[k]?'false':'true');
+      b.addEventListener('click',function(){off[k]=!off[k];b.setAttribute('aria-pressed',off[k]?'false':'true');layout()})});
+    if(f2)f2.addEventListener('input',layout);
+    layout();
   }
   if('IntersectionObserver' in window){
     var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}})},{rootMargin:'0px 0px -8% 0px'});

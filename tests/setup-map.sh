@@ -18,6 +18,7 @@ grep -q '<li class="log" data-m="[0-9]*" data-d="[^"]*" data-n="project-morning"
 grep -q 'step</span>(<span class="str">"claim"</span>);' "$T/map.html" || { echo "FAIL: the flows are not code"; fail=1; }
 grep -q 'data-s="start-work" data-t="paralel"' "$T/map.html" || { echo "FAIL: the call graph lacks start-work -> paralel"; fail=1; }
 grep -q 'data-t="claims.sh"' "$T/map.html" || { echo "FAIL: the call graph lacks a call of claims.sh"; fail=1; }
+grep -q 'id="f2"' "$T/map.html" && grep -q 'data-f="company"' "$T/map.html" || { echo "FAIL: the call graph has no filters"; fail=1; }
 if grep -q '@@' "$T/map.html"; then echo "FAIL: a template token is left in the page"; fail=1; fi
 if SETUP_MAP_CORE="$T/none" bash "$ROOT/claude/scripts/setup-map.sh" "$T/x.html" >/dev/null 2>&1; then echo "FAIL: should refuse a missing repo"; fail=1; fi
 [ "$fail" = 0 ] && echo "setup-map: all tests passed"
