@@ -1,6 +1,7 @@
 import type { On, ThemeSetArgs } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
+import { checkColors } from '../hooks/make-colors.js'
 import { THEMES, otherOwner, retakeBudget, themeOf } from '../hooks/themes'
 
 const RUN = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 80 } }
@@ -64,6 +65,15 @@ test('each theme paints, names its scene, and is pure vector', () => {
     expect(svg).not.toContain('<image')
     expect(svg).not.toContain('href')
     expect(t.scene(100)).not.toBe(t.scene(0))
+  }
+  // A theme with a yellow accent has a green accent fill, so a meter of the app is not yellow below 75 percent.
+  for (const t of THEMES.filter(t => t.window === 'dark')) {
+    const dark = (t.look.colors as any).inputs.dark
+    expect(dark['role-accent-fill']).toBe(dark['role-success-fill'])
+    expect(dark['role-accent-fill']).not.toBe(dark['role-warning-fill'])
+    expect(dark['role-accent-on']).toBe(dark['role-success-on'])
+    expect(checkColors(t.look.colors).filter(p => p.startsWith("Desktop won't paint"))).toEqual([])
+    expect(checkColors(t.look.colors)).toEqual([...t.problems])
   }
   expect(themeOf('Christmas Night')?.id).toBe(XMAS.id)
   expect(themeOf('pixel blue')?.id).toBe(PIXEL.id)

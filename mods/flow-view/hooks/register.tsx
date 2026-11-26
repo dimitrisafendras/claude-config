@@ -2063,7 +2063,7 @@ export const register: Register = on => {
     // light fill, which shows through the button. `single` gives the frame the corner radius of the button (`round`
     // gives a larger one), and no padding keeps the frame on the edge of the button. A button with no colour gets a
     // frame that does not show, so each button has the same size. The terminal gets no frame.
-    const frame = (hue?: string) =>
+    const pill = (hue?: string) =>
       e.surface === 'desktop'
         ? { padding: 0, borderStyle: 'single', borderColor: hue ?? '#00000000', backgroundColor: hue ? `${hue}59` : undefined }
         : {}
@@ -2278,9 +2278,9 @@ export const register: Register = on => {
               {TILES.map(([group, label, hue]) => {
                 const isOn = v.filter === group
                 const dim = v.filter !== 'all' && !isOn
-                // The count keeps its colour on the terminal. On the desktop the frame carries the colour (see `frame`).
+                // The count keeps its colour on the terminal. On the desktop the frame carries the colour (see `pill`).
                 return (
-                  <Box key={`tile-${group}`} {...frame(group === 'all' || dim ? undefined : hue)}>
+                  <Box key={`tile-${group}`} {...pill(group === 'all' || dim ? undefined : hue)}>
                     <Button key={`filter-${group}`} variant={isOn ? 'primary' : 'secondary'} onPress={only(group)}>
                       <Text bold color={count(group) > 0 && !dim ? hue : 'inactive'}>
                         {count(group)}
@@ -2291,11 +2291,22 @@ export const register: Register = on => {
                 )
               })}
             </Box>
+            {/* A thin line divides the filters from the groups of tickets. */}
+            {'Svg' in t ? (
+              <t.Svg
+                source={`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="1" viewBox="0 0 ${width} 1"><rect width="${width}" height="1" fill="${EDGE}"/></svg>`}
+                width={width}
+                height={1}
+                alt="Separator"
+              />
+            ) : (
+              <Text dimColor>{'─'.repeat(Math.max(8, Math.min(columns, 60)))}</Text>
+            )}
             {rows.length === 0 && <Text dimColor>No tickets in this group.</Text>}
             {groupTickets(rows).map(g => (
               <Box key={`group-${g.group}`} flexDirection="column" gap="sm">
                 {/* A real button, not plain text: the whole pill is the click area. */}
-                <Box key={`fold-row-${g.group}`} alignSelf="flex-start" {...frame(g.hue)}>
+                <Box key={`fold-row-${g.group}`} alignSelf="flex-start" {...pill(g.hue)}>
                   <Button key={`fold-${g.group}`} variant="secondary" onPress={fold(g.group)}>
                     <Text bold color={g.hue}>
                       {closed.includes(g.group) ? '▸' : '▾'} {g.mark} {g.label}
