@@ -479,3 +479,74 @@ test('the All tile is first, counts every ticket, and shows them all again', asy
   expect(await ui.find({ key: 'ticket-r05' })).toBeDefined()
   await ui.unmount()
 })
+
+test('the Steps tab shows the step of each ticket, a step shows its parts, and a ticket opens its steps', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await $.tool.call({
+    tool: 'ArtifactData',
+    action: 'batch',
+    url: 'https://claude.ai/artifact/x',
+    writes: [
+      { op: 'set', collection: 'days', doc_id: '2026-11-22', data: { phase: 'running' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r01', data: { n: 1, title: 'Fix the cart total', state: 'review', prNumber: 7, next: 'CI watch: fix try 2 of 3' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r02', data: { n: 2, title: 'Add the invoice page', state: 'queued' } },
+      { op: 'set', collection: 'days/2026-11-22/rows', doc_id: 'r03', data: { n: 3, title: 'Old work', state: 'done' } },
+    ],
+  } as never)
+  await clock.advance(3000)
+
+  expect((await $.command.run({ command: 'flow', args: 'steps', ...RUN })).text).toBe('Workflow pane shows steps.')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const has = async (text: RegExp) => (await ui.find({ type: 'Text', text })) !== undefined
+  expect(await ui.find({ key: 'pipe-ci' })).toBeDefined()
+  expect(await ui.find({ key: 'pipe-done' })).toBeDefined()
+  expect(await has(/Now at 6\. CI/)).toBe(true)
+  expect(await has(/CI watch: fix try 2 of 3/)).toBe(true)
+  expect(await has(/Now at 1\. Plan/)).toBe(true)
+  // The done ticket is not in the list of open tickets.
+  expect(await has(/Old work/)).toBe(false)
+  expect(await drawn(ui)).toContain('CI: now. ship · ci-watch · verify-gate')
+
+  // A step shows what it does, the parts that do it, and only its tickets.
+  await ui.press({ key: 'pipe-ci' })
+  expect(await has(/Done by: ship · ci-watch · verify-gate/)).toBe(true)
+  expect(await has(/Fix the cart total/)).toBe(true)
+  expect(await has(/Add the invoice page/)).toBe(false)
+
+  // A ticket opens all its steps, each with its parts.
+  expect(await has(/pr-reviewer/)).toBe(false)
+  await ui.press({ key: 'steps-r01' })
+  expect(await has(/pr-reviewer/)).toBe(true)
+  expect(await has(/merge-when-green · merge-policy/)).toBe(true)
+
+  await ui.press({ key: 'pipe-done' })
+  expect(await has(/Old work/)).toBe(true)
+  expect(await has(/All steps are done\./)).toBe(true)
+  await ui.unmount()
+})
+
+test('the Steps tab shows a ticket that a lane holds and the plan does not show', async ($, on) => {
+  const clock = world(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('process.run', (_, e) => ({
+    value: {
+      exitCode: 0,
+      stdout: e.argv.join(' ') === 'bash /home/me/.claude/claims.sh list' ? 'my-app:TICKET-7\tlane-a\t200 min left\tFix the login page\n' : '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  await $.session.start({ cwd: '/work/web-app', surface: 'desktop', isInteractive: true })
+  await clock.advance(20_000)
+
+  await $.command.run({ command: 'flow', args: 'steps', ...RUN })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const has = async (text: RegExp) => (await ui.find({ type: 'Text', text })) !== undefined
+  expect(await has(/TICKET-7 Fix the login page/)).toBe(true)
+  expect(await has(/not in the plan/)).toBe(true)
+  expect(await has(/Now at 2\. Dispatch/)).toBe(true)
+  expect(await has(/held by lane-a · claim ends in 200 min/)).toBe(true)
+  await ui.unmount()
+})

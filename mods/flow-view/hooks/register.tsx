@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Board, Call, Decision, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
+import type { Board, Call, Claim, Decision, Said, Flow, FlowNode, Involvement, Peer, PeerAgent, Step, Ticket, View, Worker } from '../types'
 
 const PANE = 'flow-view'
 const MAIN = 'main'
@@ -31,6 +31,7 @@ const board = atom(
   { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 } as Board,
   { shape: 'board-1' },
 )
+const claims = atom({ plugin: 'flow-view', key: 'claims' } as const, [] as Claim[], { shape: 'claims-1' })
 const peers = atom({ plugin: 'flow-view', key: 'peers' } as const, [] as Peer[], {
   shape: 'peers-2',
 })
@@ -240,6 +241,8 @@ export function isPeer(v: unknown): v is Peer {
 // The module's own variables start again at a reload: they only limit the rate.
 let lastPublish = 0
 let seen = ''
+let lastClaims = 0
+let seenClaims = ''
 
 /** A store that fails must not break a turn: the pane is a view only. */
 async function publish($: EngineInterface): Promise<void> {
@@ -319,11 +322,75 @@ async function refreshNow($: EngineInterface): Promise<void> {
     if (!day || v.updatedAt > day.updatedAt) day = v
   }
   const shown: Board = day ?? { id: '', phase: '', needsYou: [], rows: [], workers: [], updatedAt: 0 }
+  // The live claims, every 15 seconds: a ticket that a lane holds shows in the Steps tab also with no plan row.
+  if (now - lastClaims > CLAIMS_EVERY) {
+    lastClaims = now
+    const held = await readClaims($)
+    const claimSig = JSON.stringify(held)
+    if (claimSig !== seenClaims) {
+      seenClaims = claimSig
+      await update($, claims, () => held)
+    }
+  }
   const sig = JSON.stringify([list.map(p => ({ ...p, updatedAt: 0 })), { ...shown, updatedAt: 0 }])
   if (sig === seen) return
   seen = sig
   await update($, peers, () => list)
   await update($, board, () => shown)
+}
+
+// ---------- the claims: the tickets that a lane holds now ----------
+// claims.sh keeps one owner for each ticket in ~/.claude/claims. `claims.sh list` prints one line for each claim:
+// key, owner, time left, note, with a tab between them. The key is "<board>:<ticket>".
+const CLAIMS_EVERY = 15_000
+const MAX_CLAIMS = 30
+
+/** The live claims in the text of `claims.sh list`. An expired claim and a line that is no claim are left out. */
+export function parseClaims(text: string): Claim[] {
+  const list: Claim[] = []
+  for (const line of text.split('\n')) {
+    const [key, owner, left, note] = line.split('\t')
+    if (key === undefined || owner === undefined || left === undefined) continue
+    const min = /^(\d+) min left$/.exec(left.trim())
+    const cut = key.indexOf(':')
+    if (!min || cut < 1) continue
+    list.push({ key, board: key.slice(0, cut), ticket: key.slice(cut + 1), owner: owner.trim(), minLeft: Number(min[1]), note: (note ?? '').trim() })
+  }
+
+  return list.slice(0, MAX_CLAIMS)
+}
+
+/**
+ * The claims that no row of the plan shows, as tickets for the Steps tab. A row shows a claim when its title, its
+ * id or its link names the ticket of the claim. Such a ticket has no session or branch that the mod knows, so it is
+ * at the step Dispatch: a lane holds it.
+ */
+export function claimTickets(held: Claim[], rows: Ticket[]): Ticket[] {
+  const known = rows.map(r => `${r.id} ${r.title} ${r.url ?? ''} ${r.branch ?? ''}`.toLowerCase())
+
+  return held
+    .filter(c => !known.some(k => k.includes(c.ticket.toLowerCase())))
+    .map(c => ({
+      id: `claim:${c.key}`,
+      title: `${c.ticket}${c.note !== '' ? ` ${c.note}` : ''}`,
+      repo: c.board,
+      source: 'claim',
+      state: 'running',
+      next: `held by ${c.owner} · claim ends in ${c.minLeft} min`,
+    }))
+}
+
+async function readClaims($: EngineInterface): Promise<Claim[]> {
+  try {
+    const home = ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/\\/g, '/').replace(/\/+$/, '')
+    if (home === '') return []
+    const ran = await $.process.run(['bash', `${home}/.claude/claims.sh`, 'list'], { timeoutMs: 5000 })
+
+    return ran.exitCode === 0 ? parseClaims(ran.stdout) : []
+  } catch {
+    // No script, no bash or no permission: the tab shows the plan rows only.
+    return []
+  }
 }
 
 // State is JSON data: this removes the fields that are undefined.
@@ -1428,6 +1495,95 @@ export function drawTrack(state: string, hue: string = HUE.running, stop = 1): D
   return frame(svg, 36, wide)
 }
 
+// ---------- the steps of a ticket, by the parts that do them ----------
+// The Steps tab shows the way of a ticket through the setup: from the plan of the day to the cleanup. Each step
+// names the parts (skills, mods, scripts) that do it, in the order of the layers: intake, dispatch, environment,
+// then the work and the finish.
+
+export type PipeStep = { key: string; label: string; by: string; what: string }
+export const PIPE: PipeStep[] = [
+  { key: 'plan', label: 'Plan', by: 'start-work', what: 'The ticket is in the plan of the day and waits for a lane.' },
+  { key: 'dispatch', label: 'Dispatch', by: 'paralel · claims.sh', what: 'The dispatcher takes the claim of the ticket and starts one lane for it.' },
+  { key: 'env', label: 'Env', by: 'start-web-dev · start-mobile-dev · start-browser', what: 'The lane has a session. The dispatcher starts the environment that the surface of the ticket needs.' },
+  { key: 'work', label: 'Work', by: 'lane agents on sub-branches', what: 'Agents change the code on the branch of the ticket.' },
+  { key: 'review', label: 'Review', by: 'pr-reviewer', what: 'A reviewer that only reads checks the diff against the done criteria.' },
+  { key: 'ci', label: 'CI', by: 'ship · ci-watch · verify-gate', what: 'The PR is open. ci-watch watches its checks and starts at most 3 fix tries, each with the lessons file.' },
+  { key: 'merge', label: 'Merge', by: 'merge-when-green · merge-policy', what: 'CI is green. The merge runs when the rule of the repo allows it.' },
+  { key: 'deploy', label: 'Deploy', by: 'ci-watch · deploy', what: 'The PR is merged. ci-watch watches the deploy run of the merge commit.' },
+  { key: 'verify', label: 'Verify', by: 'deploy · test-in-chrome', what: 'The change is on staging. The test plan of the PR runs in the browser.' },
+  { key: 'close', label: 'Close', by: 'ticket-closer · cleanup', what: 'The ticket closes, and the worktree and the branch of the lane go.' },
+]
+
+/** Where a ticket is on the way: `at` is the index of its step in PIPE, or PIPE.length when all steps are done. */
+export type PipePlace = { at: number; isStopped: boolean; isDone: boolean }
+
+/**
+ * The step of a ticket, from its facts. The state gives the part of the way (queued, running, review, merged), and
+ * the facts give the step in it: a session, a branch, a PR, and the `next` text that the loops write.
+ */
+export function pipeAt(t: Pick<Ticket, 'state' | 'branch' | 'session' | 'pr' | 'prNumber' | 'next' | 'startedAt'>): PipePlace {
+  const s = t.state
+  if (s === 'verified' || s === 'closed' || s === 'skipped' || s === 'done') return { at: PIPE.length, isStopped: false, isDone: true }
+  const isStopped = s === 'needs-you' || s === 'blocked' || s === 'failed' || s === 'cancelled'
+  const next = (t.next ?? '').toLowerCase()
+  const hasPr = t.prNumber !== undefined || t.pr !== undefined
+  let key = 'plan'
+  if (s === 'merged') key = /close|clean/.test(next) ? 'close' : /verif/.test(next) ? 'verify' : 'deploy'
+  else if (hasPr || s === 'review' || s === 'draft') key = /merge/.test(next) ? 'merge' : 'ci'
+  else if (/review/.test(next)) key = 'review'
+  else if (t.branch !== undefined) key = 'work'
+  else if (t.session !== undefined) key = 'env'
+  else if (s === 'running' || s === 'pending' || t.startedAt !== undefined) key = 'dispatch'
+
+  return { at: PIPE.findIndex(p => p.key === key), isStopped, isDone: false }
+}
+
+/** How many tickets are at each step. The last number is the tickets that did all steps. */
+export function pipeCounts(rows: Ticket[]): number[] {
+  const counts = PIPE.map(() => 0).concat(0)
+  for (const r of rows) {
+    const at = pipeAt(r).at
+    counts[at] = (counts[at] ?? 0) + 1
+  }
+
+  return counts
+}
+
+/** The steps of a ticket as one line of marks, for a surface with no drawing: ✓ done, ◉ now, ■ stopped, ○ to do. */
+export function pipeLine(place: PipePlace): string {
+  return PIPE.map((p, i) => `${place.isDone || i < place.at ? '✓' : i === place.at ? (place.isStopped ? '■' : '◉') : '○'} ${p.label}`).join('  ')
+}
+
+/** The steps of a ticket as a track: one point for each step of PIPE, with its name. The step of the ticket glows. */
+export function drawPipe(place: PipePlace, hue: string = HUE.running): Drawing {
+  const gap = 44
+  const wide = 26 + (PIPE.length - 1) * gap + 26
+  let svg = ''
+  PIPE.forEach((p, i) => {
+    const x = 26 + i * gap
+    const isDone = place.isDone || i < place.at
+    const isHere = !place.isDone && i === place.at
+    const isStop = isHere && place.isStopped
+    const reached = isDone || isHere
+    if (i > 0) svg += `<line x1="${x - gap + 7}" y1="10" x2="${x - 7}" y2="10" stroke="${reached ? hue : EDGE}" stroke-width="2" stroke-linecap="round"/>`
+    const tip = `${p.label}: ${isStop ? 'stopped here' : isDone ? 'done' : isHere ? 'now' : 'to do'}. ${p.by}`
+    svg +=
+      `<g><title>${esc(tip)}</title>` +
+      `<circle cx="${x}" cy="10" r="10" fill="#000" fill-opacity="0"/>` +
+      (isStop
+        ? `<circle cx="${x}" cy="10" r="7.5" fill="${hue}" filter="url(#glow)"/><rect x="${x - 2.6}" y="7.4" width="5.2" height="5.2" rx="1" fill="${CARD}"/>`
+        : isHere
+          ? `<circle cx="${x}" cy="10" r="7" fill="${hue}" filter="url(#glow)"/><circle cx="${x}" cy="10" r="2.6" fill="${CARD}"/>`
+          : isDone
+            ? `<circle cx="${x}" cy="10" r="6" fill="${hue}"/>`
+            : `<circle cx="${x}" cy="10" r="5.5" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`) +
+      `<text x="${x}" y="31" text-anchor="middle" style="font-size:9px;font-weight:${isHere ? 800 : 500};fill:${isHere ? hue : isDone ? INK : DIM}">${esc(p.label)}</text>` +
+      `</g>`
+  })
+
+  return frame(svg, 36, wide)
+}
+
 // ---------- the sessions as cards ----------
 
 /** The colour of a session by its status: the same colours as the ticket groups. */
@@ -1832,13 +1988,13 @@ export function demoBoard(tick: number, start: number): Board {
 
 // ---------- the /flow command ----------
 
-export const FLOW_HELP = 'Use /flow [tickets | sessions | prompts | status | clear | demo | help].'
+export const FLOW_HELP = 'Use /flow [tickets | steps | sessions | prompts | status | clear | demo | help].'
 
 async function flowCommand($: EngineInterface, raw: string): Promise<string> {
   const arg = raw.trim().toLowerCase()
   if (arg === '') return 'Workflow pane opened.'
   if (arg === 'demo') return toggleDemo($)
-  if (arg === 'tickets' || arg === 'sessions' || arg === 'prompts') {
+  if (arg === 'tickets' || arg === 'steps' || arg === 'sessions' || arg === 'prompts') {
     const tab: View['tab'] = arg
     await update($, view, w => ({ ...w, tab }))
 
@@ -2040,6 +2196,7 @@ export const register: Register = on => {
     const shown = v0.live === true ? everyone.filter(p => p.status === 'running') : everyone
     const all = shown.slice(0, MAX_PEERS)
     const day = await read($, board)
+    const held = await read($, claims)
     // The width of a drawing: its own size, or less in a narrow pane (a cell is about 9 pixels).
     const width = Math.min(Math.round(W * SCALE), Math.max(280, (e.props.bodyColumns ?? 80) * 9))
     const sorted = sortTickets(day.rows)
@@ -2106,6 +2263,9 @@ export const register: Register = on => {
         <Box flexDirection="row" gap={1} flexWrap="wrap">
           <Button key="tab-tickets" variant={v.tab === 'tickets' ? 'primary' : 'secondary'} onPress={tab('tickets')}>
             Today {sorted.length > 0 ? sorted.length : ''}
+          </Button>
+          <Button key="tab-steps" variant={v.tab === 'steps' ? 'primary' : 'secondary'} onPress={tab('steps')}>
+            Steps
           </Button>
           <Button key="tab-sessions" variant={v.tab === 'sessions' ? 'primary' : 'secondary'} onPress={tab('sessions')}>
             Sessions {live > 0 ? `${live} run` : everyone.length > 0 ? everyone.length : ''}
@@ -2189,6 +2349,102 @@ export const register: Register = on => {
               ))}
           </Box>
         )}
+
+        {v.tab === 'steps' && day.id === '' && held.length === 0 && <Text dimColor>No plan and no claim yet. Run /start-work, or press Demo.</Text>}
+
+        {v.tab === 'steps' && (day.id !== '' || held.length > 0) && (() => {
+          // The way of a ticket through the setup. A press on a step shows what it does, the parts that do it and
+          // its tickets. A press on a ticket shows all its steps.
+          // The rows of the plan, then each ticket that a lane holds and the plan does not show.
+          const all = [...sorted, ...claimTickets(held, sorted)]
+          const counts = pipeCounts(all)
+          const chosen = PIPE.find(p => p.key === v.step)
+          const isDoneChosen = v.step === 'done'
+          const pickStep = (key: string) => () => update($, view, w => ({ ...w, step: w.step === key ? '' : key, ticket: '' }))
+          const openTicket = (id: string) => () => update($, view, w => ({ ...w, ticket: w.ticket === id ? '' : id }))
+          const list = all.filter(r => {
+            const place = pipeAt(r)
+            if (isDoneChosen) return place.isDone
+            if (chosen !== undefined) return !place.isDone && PIPE[place.at]?.key === chosen.key
+
+            return !place.isDone
+          })
+
+          return (
+            <Box flexDirection="column" gap={1}>
+              <Text dimColor>The way of a ticket through the setup. Press a step to see what it does and which tickets are there.</Text>
+              <Box flexDirection="row" gap={1} flexWrap="wrap">
+                {PIPE.map((p, i) => (
+                  <Box key={`pipe-box-${p.key}`} {...pill((counts[i] ?? 0) > 0 ? HUE.running : undefined)}>
+                    <Button key={`pipe-${p.key}`} variant={v.step === p.key ? 'primary' : 'secondary'} onPress={pickStep(p.key)}>
+                      {i + 1} {p.label}
+                      {(counts[i] ?? 0) > 0 ? ` ${counts[i]}` : ''}
+                    </Button>
+                  </Box>
+                ))}
+                <Box key="pipe-box-done" {...pill((counts[PIPE.length] ?? 0) > 0 ? HUE.completed : undefined)}>
+                  <Button key="pipe-done" variant={isDoneChosen ? 'primary' : 'secondary'} onPress={pickStep('done')}>
+                    ✓ Done{(counts[PIPE.length] ?? 0) > 0 ? ` ${counts[PIPE.length]}` : ''}
+                  </Button>
+                </Box>
+              </Box>
+              {chosen !== undefined && (
+                <Box flexDirection="column" borderStyle="round" borderColor={HUE.running} paddingX={1}>
+                  <Text bold color={HUE.running}>
+                    {PIPE.indexOf(chosen) + 1}. {chosen.label}
+                  </Text>
+                  <Text>{chosen.what}</Text>
+                  <Text dimColor>Done by: {chosen.by}</Text>
+                </Box>
+              )}
+              {list.length === 0 && <Text dimColor>{chosen !== undefined || isDoneChosen ? 'No ticket is at this step.' : 'No open ticket.'}</Text>}
+              {list.slice(0, MAX_ROWS).map(r => {
+                const place = pipeAt(r)
+                const hue = place.isDone ? HUE.completed : tone(r.state).hue
+                const here = PIPE[place.at]
+                const isOpen = v.ticket === r.id
+                const where = place.isDone ? 'All steps are done.' : `${place.isStopped ? 'Stopped at' : 'Now at'} ${place.at + 1}. ${here?.label ?? ''}`
+                const note = r.next !== undefined && r.next !== '' ? r.next : place.isDone ? '' : (here?.what ?? '')
+
+                return (
+                  <Box key={`steps-box-${r.id}`} flexDirection="column" borderStyle="round" borderColor={hue} paddingX={1}>
+                    <Button key={`steps-${r.id}`} plain onPress={openTicket(r.id)}>
+                      <Text bold color={hue}>
+                        {isOpen ? '▾' : '▸'}
+                      </Text>{' '}
+                      <Text dimColor>{r.n !== undefined ? `#${r.n} ` : r.source === 'claim' ? `${r.repo ?? ''} ` : ''}</Text>
+                      <Text bold>{clip(r.title, Math.max(16, columns - 12))}</Text>
+                      {r.source === 'claim' && <Text dimColor> · not in the plan</Text>}
+                    </Button>
+                    {'Svg' in t ? (
+                      <t.Svg source={drawPipe(place, hue).source} width={Math.min(width, Math.round(448 * SCALE))} alt={`${where} ${pipeLine(place)}`} />
+                    ) : (
+                      <Text color={hue}>{pipeLine(place)}</Text>
+                    )}
+                    <Text>
+                      <Text bold color={hue}>
+                        {where}
+                      </Text>
+                      {note !== '' ? ` · ${clip(note, MAX_NEXT)}` : ''}
+                    </Text>
+                    {isOpen &&
+                      PIPE.map((p, i) => {
+                        const isDone = place.isDone || i < place.at
+                        const isHere = !place.isDone && i === place.at
+
+                        return (
+                          <Text key={`steps-${r.id}-${p.key}`} dimColor={!isDone && !isHere}>
+                            <Text color={isDone || isHere ? hue : undefined}>{isDone ? '✓' : isHere ? (place.isStopped ? '■' : '◉') : '○'}</Text> {i + 1}. {p.label}
+                            <Text dimColor> · {p.by}</Text>
+                          </Text>
+                        )
+                      })}
+                  </Box>
+                )
+              })}
+            </Box>
+          )
+        })()}
 
         {v.tab === 'tickets' && day.id === '' && <Text dimColor>No plan yet. Run /start-work, or press Demo.</Text>}
 

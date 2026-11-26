@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { drawProgress, groupSessions, sessionHue, tidyTitle, toDecisions, deadlineWords, clockOf, defaultMark, decisionLines, drawOverview, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
+import { parseClaims, claimTickets, PIPE, pipeAt, pipeCounts, pipeLine, drawPipe, drawProgress, groupSessions, sessionHue, tidyTitle, toDecisions, deadlineWords, clockOf, defaultMark, decisionLines, drawOverview, splitNote, drawTrack, stoppedAt, cardFacts, ticketCrew, ACTIONS, automateText, countPrompt, promptKey, reportPrompts, ago, applyFact, facts, phaseParts, groupTickets, stepParts, ticketRef, shareTime, stepList, stepOf, ticketTime, timed, isTyped, said, timeFacts, timeLines, turned, bucket, capTools, card, ciMark, clip, nodeHue, isBoard, isPeer, merge, toPeer, demoBoard, demoPeers, drawPhases, drawRun, drawTicket, failedAgents, plan, plural, sortPeers, sortTickets, span, stamp, ticketFacts, tip, tone } from '../hooks/register'
 import type { Decision } from '../types'
 
 // Pure helpers: no engine sits beneath these tests.
@@ -553,4 +553,54 @@ test('merge keeps the next action of a row, and the demo shows next actions and 
   expect(rows[0]?.next).toBe('CI watch: fix try 2 of 3 · 6 min')
   expect(demoBoard(10, 0).rows.some(r => r.next !== undefined)).toBe(true)
   expect(demoBoard(10, 0).decisions?.length).toBe(2)
+})
+
+test('pipeAt finds the step of a ticket from its facts', () => {
+  const key = (t: Parameters<typeof pipeAt>[0]) => PIPE[pipeAt(t).at]?.key
+  expect(key({ state: 'queued' })).toBe('plan')
+  expect(key({ state: 'running' })).toBe('dispatch')
+  expect(key({ state: 'running', session: 'lane-web' })).toBe('env')
+  expect(key({ state: 'running', session: 'lane-web', branch: 'fix/cart' })).toBe('work')
+  expect(key({ state: 'running', branch: 'fix/cart', next: 'review of the sub-branch' })).toBe('review')
+  expect(key({ state: 'review', prNumber: 7, next: 'CI watch: fix try 2 of 3' })).toBe('ci')
+  expect(key({ state: 'review', prNumber: 7, next: 'merge on green' })).toBe('merge')
+  expect(key({ state: 'merged', prNumber: 7, next: 'deploy check: ci-watch watches the deploy' })).toBe('deploy')
+  expect(key({ state: 'merged', prNumber: 7, next: 'verify on staging' })).toBe('verify')
+  expect(key({ state: 'merged', prNumber: 7, next: 'close and cleanup' })).toBe('close')
+  expect(pipeAt({ state: 'verified' })).toEqual({ at: PIPE.length, isStopped: false, isDone: true })
+  // A ticket that waits for the person stops at the step that its facts show.
+  expect(pipeAt({ state: 'needs-you', prNumber: 7, next: 'waits for a decision: no progress after 2 fix tries' })).toEqual({ at: 5, isStopped: true, isDone: false })
+  expect(pipeAt({ state: 'needs-you', prNumber: 7, next: 'waits for a decision: merge refused' }).at).toBe(6)
+})
+
+test('pipeCounts, pipeLine and drawPipe show the same place', () => {
+  const rows = [
+    { id: 'a', title: 'A', state: 'queued' },
+    { id: 'b', title: 'B', state: 'review', prNumber: 7 },
+    { id: 'c', title: 'C', state: 'done' },
+  ]
+  const counts = pipeCounts(rows)
+  expect(counts.length).toBe(PIPE.length + 1)
+  expect(counts[0]).toBe(1)
+  expect(counts[5]).toBe(1)
+  expect(counts[PIPE.length]).toBe(1)
+  expect(pipeLine({ at: 5, isStopped: false, isDone: false })).toContain('✓ Review  ◉ CI  ○ Merge')
+  expect(pipeLine({ at: 5, isStopped: true, isDone: false })).toContain('■ CI')
+  const d = drawPipe({ at: 5, isStopped: false, isDone: false }).source
+  expect(d).toContain('CI: now. ship · ci-watch · verify-gate')
+  expect(d).toContain('Merge: to do.')
+  expect(d).toContain('Work: done.')
+})
+
+test('parseClaims reads the live claims, and claimTickets keeps the ones that the plan does not show', () => {
+  const text = 'my-app:TICKET-1\tlane-a\t230 min left\tFix login\nmy-app:TICKET-2\tlane-b\texpired\t\nno claims\nshop:T-9\tlane-c\t12 min left\t'
+  const held = parseClaims(text)
+  expect(held).toEqual([
+    { key: 'my-app:TICKET-1', board: 'my-app', ticket: 'TICKET-1', owner: 'lane-a', minLeft: 230, note: 'Fix login' },
+    { key: 'shop:T-9', board: 'shop', ticket: 'T-9', owner: 'lane-c', minLeft: 12, note: '' },
+  ])
+  const extra = claimTickets(held, [{ id: 'r01', title: '[TICKET-1] Fix login', state: 'running' }])
+  expect(extra.length).toBe(1)
+  expect(extra[0]).toEqual({ id: 'claim:shop:T-9', title: 'T-9', repo: 'shop', source: 'claim', state: 'running', next: 'held by lane-c · claim ends in 12 min' })
+  expect(PIPE[pipeAt(extra[0]!).at]?.key).toBe('dispatch')
 })

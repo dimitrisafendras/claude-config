@@ -1,7 +1,7 @@
 {
   "name": "flow-view",
-  "version": "0.8.0",
-  "description": "A dashboard pane for the work day: the /start-work tickets and your sessions as short lists that open on a press",
+  "version": "0.9.0",
+  "description": "A dashboard pane for the work day: the /start-work tickets and your sessions as short lists that open on a press. The Steps tab shows the step of each ticket on its way through the setup, and the parts that do each step",
   "author": {
     "name": "claude-config"
   },
