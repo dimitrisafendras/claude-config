@@ -614,7 +614,7 @@ export function mergeText(e: Pick<Entry, 'repo' | 'number' | 'title'>, method: M
     ` Run the \`merge-when-green\` skill steps for it now, with no question to the user:` +
     ` 1. Read the PR once with \`gh pr view ${e.number} -R ${e.repo} --json isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup\`; if it is no longer green and clean, stop and say why.` +
     ` 2. Read the repo's CLAUDE.md and AGENTS.md for a merge rule that needs a person; if there is one, stop and name it.` +
-    ` 3. Run exactly \`gh pr merge ${e.number} -R ${e.repo} --${method} --delete-branch\`. merge-policy checks that call.` +
+    ` 3. Run exactly \`gh pr merge ${e.number} -R ${e.repo} --${method} --delete-branch\`, as one Bash call that holds only this command: no pipe, no \`;\` or \`&&\` after it, no redirect such as \`2>&1\`. merge-policy approves only this plain shape; any other shape makes it ask a person. Read the result in a second call. merge-policy checks that call.` +
     ` If merge-policy or a repo rule refuses the merge, the refusal is final: say so, do not retry and do not work around it.`
   if (!loop) return head
   const rec = record(e, 'merge-refused', `merge-policy or a repo rule refused the merge of ${label(e)}. How to go on?`, ['a person merges it', 'leave it open'], now)

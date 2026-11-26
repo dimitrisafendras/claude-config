@@ -23,7 +23,7 @@ The lane loop runs this skill at its merge stage, with no person. Check `bash ~/
    - Any check still running or queued: add the PR to ci-watch with the intent "merge on green": `/ci-watch add <n>`. Say that the merge runs on the green turn. Do not wait here.
    - All checks passed, not a draft, no conflict, no requested changes: go to step 4.
 4. **Check the repo rule.** Read the repo's `CLAUDE.md` and `AGENTS.md` (if present) for a merge rule. A rule that needs an admin gate, a second approval or a manual step: stop. Say which rule. Never work around it.
-5. **Merge.** Use the merge style the repo allows: `gh repo view -R <repo> --json mergeCommitAllowed,squashMergeAllowed` (prefer a merge commit when both are allowed, as the history of the repo shows). Run `gh pr merge <n> -R <repo> --merge` or `--squash`. Do not delete the branch. The merge policy mod may refuse the command: if it does, stop and report its reason.
+5. **Merge.** Use the merge style the repo allows: `gh repo view -R <repo> --json mergeCommitAllowed,squashMergeAllowed` (prefer a merge commit when both are allowed, as the history of the repo shows). Run `gh pr merge <n> -R <repo> --merge` or `--squash` as one Bash call that holds only this command: no pipe, no `;` or `&&` after it, no redirect such as `2>&1`. merge-policy approves only this plain shape; any other shape makes it ask a person. Read the result in a second call. Do not delete the branch. The merge policy mod may refuse the command: if it does, stop and report its reason.
 6. **Report.** One line: the PR, the merge commit (`gh pr view <n> -R <repo> --json mergeCommit -q .mergeCommit.oid`), and the next step (`/cleanup` removes its worktree).
 
 ## Boundaries
