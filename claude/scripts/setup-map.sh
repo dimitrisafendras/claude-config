@@ -31,7 +31,7 @@ flows = [
  ("After the merge",[("deploy watch","the run of the merge commit"),("verify","staging, with evidence"),("ticket-closer","close the ticket"),("cleanup","worktree and branch, at once")]),
  ("Keep it clean",[("12:00","sweep: repair stale PRs"),("03:00","config-loop: pull, install, audit"),("02:30","nightly-cleanup"),("19:00","prefs-sync"),("Monday","audit and releases digest")]),
  ("Change the setup",[("edit","main checkout, dev branch"),("/reload-plugins","look, repeat"),("one PR","CI must pass"),("merge on green","auto-merge"),("pull + install","install.sh --mods")]),
- ("Run it by hand",[("/autonomy status","loops, last run, kill switch"),("/autonomy run <loop>","one loop, now"),("/autonomy run lane <ticket>","one ticket, now"),("/autonomy off","the kill switch")]),
+ ("Run it by hand",[("/autonomy status","loops, last run, kill switch"),("/autonomy run <loop>","one loop, now"),("/autonomy run lane <ticket>","one ticket, now"),("/start-work <project>","one board, now: its tickets and its dispatcher"),("/autonomy off","the kill switch")]),
 ]
 rules = [
  ("kill switch","The file ~/.claude/autonomy.off stops every loop at its next step. /autonomy off and on set it."),
