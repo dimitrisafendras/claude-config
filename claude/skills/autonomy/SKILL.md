@@ -34,7 +34,7 @@ A manual run ignores the schedule, not the kill switch and not the limits.
 `/autonomy run lane <ticket>` (for example `SN-123`):
 
 1. Run `bash ~/.claude/autonomy.sh run lane <ticket>`. Stop if it refuses.
-2. Read the ticket. A ticket that is blocked or `needs-you` does not start: say why.
+2. Read the ticket. A ticket that is blocked or `needs-you` does not start: say why. Then claim it: `bash ~/.claude/claims.sh claim <board>:<ticket> --owner <this session> --note "<title>"`. Exit 1 means another session owns it (a morning loop, a lane, a person): say who, and stop. Never take it by force.
 3. Run the `paralel` lane loop for this one ticket (see "Lane loop" in the `paralel` skill): work, PR, reviewer, CI fixes, merge on green, deploy check, staging verify, close, cleanup.
 4. End with `done` or `needs-you` and the decision record.
 

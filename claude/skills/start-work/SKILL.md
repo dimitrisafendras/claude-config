@@ -30,7 +30,11 @@ One command for the whole day: housekeeping, inbox, one plan, start, and a live 
 
 ## Stage 0 — Use a prepared day
 
-Read today's day document of the scope. When its `phase` is `inbox` and its `updatedAt` is less than 4 hours old (a morning routine prepared it), do not collect again: run `morning.sh` for fresh PR states (stage 1, step 1 only), keep the rows of the extra sources from the document, say "prepared at <time>" in one line, and go to stage 3. Else start at stage 1.
+Read today's day document of the scope. When its `phase` is `inbox` and its `updatedAt` is less than 4 hours old (a morning routine prepared it), do not collect again: run `morning.sh` for fresh PR states (stage 1, step 1 only), keep the rows of the extra sources from the document, say "prepared at <time>" in one line, and go to stage 3.
+
+When its `phase` is `plan` or `running` and its `updatedAt` is of today, another session coordinates this scope now (a morning loop or an earlier manual run). Join it, do not start again: say "joined the day of <time>" in one line, keep its rows and their numbers, and go to stage 3 with the rules of "A second coordinator" in `references/monitor.md`.
+
+Else start at stage 1.
 
 ## Stage 1 — Housekeeping (no questions)
 
@@ -52,6 +56,8 @@ Update the day document: `phase: "inbox"`.
 ## Stage 3 — One plan
 
 Classify each item: surface, severity (1 to 4), difficulty (XS, S, M, L) and model. Use the extra source's own classification rules when its file has them. Add a **repo** for each row; a PR row has its repo already. A source file can say which repo its items belong to (`projects.conf` marks the board's project with `board`).
+
+**One owner for each ticket.** Before ranking, run `bash ~/.claude/claims.sh list` once and match each ticket row to its key (`<board>:<ticket>`). A row that another session owns (a live claim of an owner that is not this session) is not dispatched. Print it in its own group "running elsewhere" with the owner and the time left, and go on with the other rows. A row with no claim, or an expired claim, is free. Run `bash ~/.claude/claims.sh prune` first.
 
 Order:
 1. Severity 4: production incidents, security, new errors that many users hit.

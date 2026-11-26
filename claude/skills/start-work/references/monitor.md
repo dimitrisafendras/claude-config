@@ -17,5 +17,6 @@ Rules:
 - Write when a state really changes: a row starts, goes to review, merges, is verified, blocks or fails; a session starts or ends; a PR's CI changes. Never write on a timer or for unchanged data.
 - An extra source file can name a board to keep current. Then update its item at the same state changes, as that file says.
 - With nested sessions, the sessions report to the coordinator, and the coordinator writes. Check a session's claim (PR, diff) before you mark a row merged or verified.
+- **A second coordinator** (two sessions that run the same scope on the same day) shares the day document. It does not write the plan again and does not change `phase` back. It reads the rows first. It starts only a row that is `queued` and that it can claim (`bash ~/.claude/claims.sh claim`, see `lanes.md`). It writes only the rows that its own lanes hold, and puts its own name in their `session` field. A new item gets the next free row number after the last one. Each write is pinned with `if_version`: when it fails, read the document and write again, never overwrite. The day gets `phase: "done"` only when no row is `running` or `queued` with a live claim.
 - When the day ends: `phase: "done"` and a `report` (what merged, the verdicts, what is left for tomorrow).
 
