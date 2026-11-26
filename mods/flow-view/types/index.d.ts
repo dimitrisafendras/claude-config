@@ -130,6 +130,9 @@ export type Decision = {
   reversible: boolean
 }
 
+/** A ticket that a lane holds now, from `claims.sh list`. The key is "<board>:<ticket>". */
+export type Claim = { key: string; board: string; ticket: string; owner: string; minLeft: number; note: string }
+
 /** One day of /start-work. */
 export type Board = {
   id: string
@@ -144,9 +147,11 @@ export type Board = {
 }
 
 export type View = {
-  tab: 'tickets' | 'sessions' | 'prompts'
+  tab: 'tickets' | 'steps' | 'sessions' | 'prompts'
   /** Which tickets the list shows. */
   filter: 'all' | 'running' | 'review' | 'done' | 'needs' | 'queued'
+  /** The step that the Steps tab shows, a key of PIPE or 'done', or '' for all open tickets. */
+  step?: string
   /** The ticket that is open, or ''. */
   ticket: string
   /** The session that is open, or ''. */
@@ -163,6 +168,6 @@ export type View = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'flow-view': { flow: Shaped<Flow>; view: Shaped<View>; peers: Shaped<Peer[]>; board: Shaped<Board>; typed: Shaped<Said[]> }
+    'flow-view': { flow: Shaped<Flow>; view: Shaped<View>; peers: Shaped<Peer[]>; board: Shaped<Board>; typed: Shaped<Said[]>; claims: Shaped<Claim[]> }
   }
 }

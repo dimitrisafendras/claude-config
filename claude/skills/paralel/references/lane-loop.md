@@ -16,8 +16,8 @@ A ticket has one owner at a time, across all sessions of this computer (a mornin
 1. **Work.** Agents on sub-branches, reviewer per sub-branch, the lane check (`keep-it-running.md`, 6).
 2. **PR.** Open it with `mcp__ship__ship` (`keep-it-running.md`, 7). Write `next` on the ticket row: "CI running, ci-watch wakes the lane".
 3. **Reviewer.** A separate agent reviews the PR against the done criteria. A CONFIRMED finding goes back to stage 1.
-4. **Fix red CI and conflicts.** At most **3 automatic tries for each PR**, counted over all checks. The fourth failure ends the lane as `needs-you`.
-5. **Merge on green.** Run the `merge-when-green` rules. In a company repo the merge runs with no approval when the repo merge policy (`merge-policy`) allows it. A refusal is final: `needs-you`.
+4. **Fix red CI and conflicts.** At most **3 automatic tries for each PR**, counted over all checks. The fourth failure ends the lane as `needs-you`. Each try reads the lessons file of the repo (`~/.claude/ci-lessons/<repo>.md`) and the failed log before it names a cause, and adds one entry after the push. Try 2 and 3 run in a fresh subagent that gets the log, the lessons file and one line for each earlier try, not this conversation. When the same checks stay red two times in a row, `ci-watch` stops the tries early: `needs-you`.
+5. **Merge on green.** Run the `merge-when-green` rules. Run `gh pr merge` as one Bash call with only that command: `merge-policy` approves only the plain shape, and any other shape asks a person. In a company repo the merge runs with no approval when the repo merge policy (`merge-policy`) allows it. A refusal is final: `needs-you`.
 6. **Deploy check.** The `deploy` skill starts by itself when `ci-watch` sees the merge: wait for the staging deploy.
 7. **Verify on staging.** The `deploy` skill tests the PR test plan. Evidence goes on the ticket.
 8. **Close the ticket.** Only after `verified` (or `done` for a lane with no deploy).
@@ -33,6 +33,21 @@ Each lane ends in one of two states:
 ## The `next` field
 
 Each lane writes the `next` field of its ticket row at every stage change: up to 90 characters, what the system does next and when. Examples: "CI running, fix try 1 of 3 if red", "merge on green under merge-policy", "staging verify after deploy". At `needs-you`, `next` names the decision: "waits for a decision, default at <time>". At `done`, `next` is empty.
+
+### What the Steps tab reads
+
+The Steps tab of the `flow-view` pane puts each ticket on a way of 10 steps: plan, dispatch, environment, work, review, CI, merge, deploy, verify, close. It finds the step from the ticket row: the state, the session, the branch, the PR and the words of `next`. So write these words:
+
+| Stage of the lane | State of the row | `next` must contain |
+|---|---|---|
+| Reviewer runs (before the PR, or stage 3) | `running` | "review" |
+| PR open, CI runs or a fix try runs | `review` | "CI" (not the word "merge") |
+| CI green, the merge is next | `review` | "merge" |
+| Merged, the deploy runs | `merged` | "deploy" |
+| Deploy done, the verify runs | `merged` | "verify" |
+| Verified, close and cleanup are next | `merged` | "close" |
+
+A lane that started with no plan row (a manual `/paralel` or `/autonomy run lane <ticket>`) still shows in the tab: the tab reads `claims.sh list` and puts each claim with no row at the step Dispatch, with the note of the claim as its title. So always give `--note "<ticket title>"` with the claim. When the Work Monitor has a day for the project, also write a row for the ticket: only a row lets the tab show the steps after Dispatch.
 
 ## Where a person is still needed
 
