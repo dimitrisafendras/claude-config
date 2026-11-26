@@ -22,7 +22,7 @@ Use `mcp__ccd_session__start_session` with:
 - title `<Surface>: <repo> <date>`, and a short `name` such as `web-shop`.
 
 The brief holds:
-1. The first instruction: invoke the lane's environment skill when one is installed (for example `start-web-dev` or `start-mobile-dev`), else the dispatcher skill `paralel`, and run all its phases, then dispatch the rows below.
+1. The first instruction: invoke the dispatcher skill as a lane (the project's dispatcher when a source names one, else `paralel`) and dispatch the rows below. The dispatcher decides the environment of the lane and runs it first when the work must be seen running.
 2. The lane's plan rows with links, sizes, models and the "why" column, so the session does not fetch or rank again.
 3. The board owner, and the rules of the extra source's file in `~/.claude/start-work.d/` about keeping its items current.
 4. The cap: at most two work agents at once in that session.

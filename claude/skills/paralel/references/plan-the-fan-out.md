@@ -44,7 +44,7 @@ Use more than one agent in a lane only when the subtasks touch disjoint paths. G
 
 ## 3b. Environment per lane
 
-A lane whose work must be seen running gets `env`. The lane runs its environment skill first, so its agents and its reviewer can see the app:
+The surface of a lane is decided here and nowhere else. A lane whose work must be seen running gets `env`. The lane runs its environment skill first, so its agents and its reviewer can see the app:
 
 | Lane work | `env` | Skill the lane runs first |
 |---|---|---|
@@ -56,7 +56,11 @@ Rules:
 - One dev server or simulator per lane, from the lane's own worktree. Agents of the lane share it and use their own browser tab (`start-web-dev`).
 - A dev server or simulator is a heavy job. Count it in the room (`memory-budget.md`): a lane with `env` takes one heavy slot while its app runs. If there is no slot, queue the lane.
 - Two lanes on one surface get two environments on two ports, never a shared one. Same files means the same lane, so that case does not arise.
-- The environment skill ends its own setup by invoking `/paralel`. In a lane that is already done: do not plan again, do not start sessions. (The environment skills are kept apart from this skill, so this rule lives here, not in them.)
+- A project can name its own environment skill for a surface in its file in `~/.claude/start-work.d/` (the line with `environment skill`). Use that skill in place of the one in the table.
+- An environment skill is a leaf. It boots the app, opens it, verifies it and reports. It does not plan, dispatch, start sessions or merge, and it does not start this skill. When it returns, the lane goes on with its rows.
+- An older environment skill can still end with "invoke `/paralel`". In a lane, and in a session where this skill is on, that step is already met: do not plan again and do not start sessions.
+- Reuse before you start: an environment that is up for this worktree is used as it is. Do not run the environment skill a second time for it.
+- The "stay" plan (one lane in this session) follows the same rule: when its work must be seen running, this session runs the environment skill first, then the core loop.
 - One iOS simulator device runs one app. Two mobile lanes need two devices; with one device, run the mobile lanes one after another and queue the second.
 - The coordinator never runs an environment itself. It stays light.
 - At the end, the lane stops its app (`lanes.md`, Phase 5, step 3).

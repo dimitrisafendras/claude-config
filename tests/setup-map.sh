@@ -19,6 +19,8 @@ grep -q 'step</span>(<span class="str">"claim"</span>);' "$T/map.html" || { echo
 grep -q 'data-s="start-work" data-t="paralel"' "$T/map.html" || { echo "FAIL: the call graph lacks start-work -> paralel"; fail=1; }
 grep -q 'data-t="claims.sh"' "$T/map.html" || { echo "FAIL: the call graph lacks a call of claims.sh"; fail=1; }
 grep -q 'id="f2"' "$T/map.html" && grep -q 'data-f="company"' "$T/map.html" || { echo "FAIL: the call graph has no filters"; fail=1; }
+grep -q 'class="nd g-l2" data-id="paralel"' "$T/map.html" || { echo "FAIL: paralel has no layer color in the graph"; fail=1; }
+grep -q 'data-f="l3"' "$T/map.html" || { echo "FAIL: no flag for the environment layer"; fail=1; }
 if grep -q '@@' "$T/map.html"; then echo "FAIL: a template token is left in the page"; fail=1; fi
 if SETUP_MAP_CORE="$T/none" bash "$ROOT/claude/scripts/setup-map.sh" "$T/x.html" >/dev/null 2>&1; then echo "FAIL: should refuse a missing repo"; fail=1; fi
 [ "$fail" = 0 ] && echo "setup-map: all tests passed"

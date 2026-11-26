@@ -47,7 +47,7 @@ SETTINGS=("$S"); [ -n "$PR" ] && [ -f "$PR/settings.json" ] && SETTINGS+=("$PR/s
 # The links to make, one "source<TAB>target" per line. Skills are found by folder, so a new skill needs no list.
 links() {
   printf '%s\t%s\n' "$C/CLAUDE.md" "$D/CLAUDE.md" "$C/output-styles/ste.md" "$D/output-styles/ste.md" \
-    "$C/agents/pr-reviewer.md" "$D/agents/pr-reviewer.md"
+    "$C/agents/pr-reviewer.md" "$D/agents/pr-reviewer.md" "$C/layers.conf" "$D/layers.conf"
   local d f
   for d in "$C"/skills/*/; do printf '%s\t%s\n' "${d%/}" "$D/skills/$(basename "$d")"; done
   for f in "$C"/scripts/*; do printf '%s\t%s\n' "$f" "$D/$(basename "$f")"; done

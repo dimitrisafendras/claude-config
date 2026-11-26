@@ -113,7 +113,7 @@ def item(n, d, k, v='', co=0):
     ver = f'<em>{e(v)}</em>' if v else ''
     return f'<li class="item{" is-co" if co else ""}" data-k="{e((n+" "+d).lower())}"><span class="nm">{e(n)}{ver}{tag}</span><span class="ds">{e(d)}</span></li>'
 
-skills_html = "\n".join(item(n,d,'s','',c) for n,d,c in skills)
+skills_html = "__SKILLS_LATER__"
 mods_html = "\n".join(item(n,d,'m',v,c) for n,v,d,c in mods)
 extras_html = "\n".join(item(n,d,'x') for n,d in extras)
 rules_html = "\n".join('<li class="item"><span class="nm">%s</span><span class="ds">%s</span></li>' % (e(a.replace(' ', '_')), e(b)) for a,b in rules)
@@ -176,37 +176,72 @@ for first, crons, n, d in routines:
     if n not in kind_of: kind_of[n] = 'routine'; about[n] = d
 for n, d in extras:
     if n not in kind_of: kind_of[n] = 'script'; about[n] = d
+# layers.conf (the core's and the profile's): the layer of each skill and the skills that it calls. The calls of a
+# skill to a skill come from that file. A skill that only names another skill gives a hint, not a call.
+LAYERS = [(1, 'intake', 'collect and rank the work'), (2, 'dispatch', 'decide the lanes, the surface and the environment'),
+          (3, 'environment', 'make the app run and visible'), (4, 'finish', 'merge, deploy, verify, ship'),
+          (5, 'tools', 'one exact job for all layers'), (9, 'view', 'read-only')]
+layer_of, declared = {}, {}
+for conf in (CORE + '/claude/layers.conf', PROF + '/layers.conf'):
+    if not os.path.isfile(conf): continue
+    for line in open(conf, encoding='utf-8'):
+        w = line.split('#')[0].split()
+        if len(w) >= 2 and w[1].isdigit(): layer_of[w[0]] = int(w[1]); declared[w[0]] = w[2:]
+def group_of(n):
+    k = kind_of[n]
+    return ('l%d' % layer_of[n]) if k == 'skill' and n in layer_of else ('l0' if k == 'skill' else k)
+def strip_hints(t):
+    t = re.sub(r'\A---\r?\n.*?\r?\n---\r?\n', '', t, flags=re.S)
+    return re.sub(r'(?ms)^## Next\b.*?(?=^## |\Z)', '', t)
 sources = {}
 for root in (CORE + '/claude/skills', PROF + '/skills'):
     for d in sorted(glob.glob(root + '/*/')):
         # normpath: on Windows the folder from glob ends with a backslash, and then basename gives an empty name.
         sources[os.path.basename(os.path.normpath(d))] = read_all(glob.glob(os.path.join(d, '**', '*.md'), recursive=True))
+skill_text = dict(sources)
 for q in glob.glob(CORE + '/routines/*.md'):
     f = front(q); n = f.get('name', os.path.basename(q)[:-3])
     if kind_of.get(n) == 'routine': sources[n] = read_all([q]) + "\n" + " ".join('`%s`' % x.strip() for x in f.get('skills', '').strip('[]').split(',') if x.strip())
-edges = set()
+edges = {}   # (from, to) -> 'c' for a call, 'h' for a hint
 for src, text in sources.items():
     if src not in kind_of: continue
     for n, k in kind_of.items():
         if n == src: continue
+        if k == 'skill' and kind_of[src] == 'skill':
+            if n in declared.get(src, []): edges[(src, n)] = 'c'
+            elif skill_ref(n).search(text): edges[(src, n)] = 'h'
+            continue
         hit = (k == 'skill' and skill_ref(n).search(text)) or (k == 'script' and n.endswith('.sh') and n in text) or (k == 'mod' and mod_ref(n).search(text))
-        if hit: edges.add((src, n))
+        if hit: edges[(src, n)] = 'c'
 linked = {x for ed in edges for x in ed}
-g_nodes = [n for k in ('routine', 'skill', 'mod', 'script') for n in sorted(kind_of) if kind_of[n] == k and (k == 'skill' or n in linked)]
+ORDER = ['routine'] + ['l%d' % l for l, _, _ in LAYERS] + ['l0', 'mod', 'script']
+g_nodes = [n for g in ORDER for n in sorted(kind_of) if group_of(n) == g and (kind_of[n] == 'skill' or n in linked)]
 ROW, GX, GW = 19, 214, 560
 gy = {n: 16 + i * ROW for i, n in enumerate(g_nodes)}
 GH = 16 + len(g_nodes) * ROW
 gs = ['<svg class="graph" id="graph" viewBox="0 0 %d %d" role="img" aria-label="Which part calls which other part.">' % (GW, GH)]
-for a, b in sorted(edges):
+for (a, b), t in sorted(edges.items()):
     if a not in gy or b not in gy: continue
     y1, y2 = gy[a], gy[b]; d = abs(y2 - y1)
-    gs.append('<path class="ed s-%s" data-s="%s" data-t="%s" d="M%d %d A%.0f %.1f 0 0 %d %d %d"/>' % (kind_of[a], e(a), e(b), GX, y1, min(320, 24 + d * 0.42), d / 2.0, 1 if y2 > y1 else 0, GX, y2))
+    gs.append('<path class="ed%s s-%s" data-s="%s" data-t="%s" data-y="%s" d="M%d %d A%.0f %.1f 0 0 %d %d %d"/>' % (' hint' if t == 'h' else '', group_of(a), e(a), e(b), t, GX, y1, min(320, 24 + d * 0.42), d / 2.0, 1 if y2 > y1 else 0, GX, y2))
 for n in g_nodes:
-    gs.append('<g class="nd k-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="hitbox" x="0" y="%d" width="%d" height="%d"/><text x="%d" y="%d" text-anchor="end">%s</text><circle cx="%d" cy="%d" r="3.6"/></g>' % (kind_of[n], e(n), e(n), gy[n] - 9, GX + 10, ROW, GX - 12, gy[n] + 4, e(n), GX, gy[n]))
+    gs.append('<g class="nd g-%s" data-id="%s" tabindex="0" role="button" aria-label="%s"><rect class="hitbox" x="0" y="%d" width="%d" height="%d"/><text x="%d" y="%d" text-anchor="end">%s</text><circle cx="%d" cy="%d" r="3.6"/></g>' % (group_of(n), e(n), e(n), gy[n] - 9, GX + 10, ROW, GX - 12, gy[n] + 4, e(n), GX, gy[n]))
 gs.append('</svg>')
 graph_html = "\n".join(gs)
-graph_data = json.dumps({'x': GX, 'row': ROW, 'w': GW, 'n': {n: [kind_of[n], about.get(n, ''), 1 if co_of.get(n) else 0] for n in g_nodes}, 'e': sorted([a, b] for a, b in edges if a in gy and b in gy)}).replace('</', '<\\/')
-N_EDGES = sum(1 for a, b in edges if a in gy and b in gy)
+in_graph = sorted([a, b, t] for (a, b), t in edges.items() if a in gy and b in gy)
+graph_data = json.dumps({'x': GX, 'row': ROW, 'w': GW, 'n': {n: [group_of(n), about.get(n, ''), 1 if co_of.get(n) else 0] for n in g_nodes}, 'e': in_graph}).replace('</', '<\\/')
+N_EDGES = sum(1 for x in in_graph if x[2] == 'c')
+# The layers as a short listing, and one flag for each group of the graph.
+lay_rows = ['<li class="item g-routine"><span class="nm">0 trigger</span><span class="ds">a routine, a slash command or an event starts something</span></li>']
+for l, name, what in LAYERS:
+    members = ' '.join(sorted(n for n in layer_of if layer_of[n] == l and n in kind_of))
+    lay_rows.append('<li class="item g-l%d"><span class="nm">%d %s</span><span class="ds">%s: %s</span></li>' % (l, l, e(name), e(what), e(members)))
+layers_html = "\n".join(lay_rows)
+flag_names = [('routine', 'routines')] + [('l%d' % l, name) for l, name, _ in LAYERS] + [('mod', 'mods'), ('script', 'scripts')]
+flags_html = "".join('<button type="button" class="g-%s" data-f="%s" aria-pressed="true">--%s</button>' % (g, g, e(nm)) for g, nm in flag_names)
+group_names = json.dumps({'routine': 'routine, layer 0 trigger', 'mod': 'mod', 'script': 'script', 'l0': 'skill, no layer', **{'l%d' % l: 'skill, layer %d %s' % (l, name) for l, name, _ in LAYERS}})
+
+skills_html = "\n".join(item(n, d, 's', '', c).replace('<li class="item', '<li class="item g-%s' % group_of(n), 1) for n, d, c in skills)
 
 # ---- the footer facts come from the settings of the repo, when they are there ----
 foot = []
@@ -229,10 +264,10 @@ page = r"""<title>Setup Map</title>
    are code with a program counter, the routines are a log of the day, the parts are listings.
    One color for each kind of part, the same in every pane. */
 :root{--bg:#0a0d22;--panel:#0f1430;--raised:#182049;--ink:#eef1ff;--dim:#8f9ac6;--line:#283069;--dot:#1b2150;
---skill:#38d8f0;--mod:#b996ff;--routine:#ffc44d;--script:#45e3a4;--glow:.16;
+--skill:#38d8f0;--mod:#b996ff;--routine:#ffc44d;--script:#45e3a4;--l1:#ff8fb1;--l2:#38d8f0;--l3:#7aa8ff;--l4:#ff7a5c;--l5:#d7e85a;--l9:#c3c9e6;--glow:.16;
 --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;--body:"Geist",ui-sans-serif,system-ui,sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;color-scheme:dark}
-@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--glow:.10;color-scheme:light}}
-:root[data-theme="light"]{--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--glow:.10;color-scheme:light}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--l1:#b92d62;--l2:#087a90;--l3:#2b55c4;--l4:#b8401f;--l5:#5f6d05;--l9:#5a6288;--glow:.10;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f2f3fb;--panel:#ffffff;--raised:#e9ebf8;--ink:#131a3d;--dim:#535d88;--line:#d3d7ee;--dot:#dfe2f3;--skill:#087a90;--mod:#6638d2;--routine:#8f5f06;--script:#12764e;--l1:#b92d62;--l2:#087a90;--l3:#2b55c4;--l4:#b8401f;--l5:#5f6d05;--l9:#5a6288;--glow:.10;color-scheme:light}
 *{box-sizing:border-box}
 body{background-color:var(--bg);background-image:radial-gradient(38rem 16rem at 22% 9rem,color-mix(in srgb,var(--mod) calc(var(--glow)*100%),transparent),transparent 70%),radial-gradient(34rem 15rem at 76% 6rem,color-mix(in srgb,var(--skill) calc(var(--glow)*100%),transparent),transparent 70%),radial-gradient(var(--dot) 1px,transparent 1.2px);background-repeat:no-repeat,no-repeat,repeat;background-size:100% 30rem,100% 30rem,22px 22px;color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.55;padding-block:0 4rem;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
@@ -277,6 +312,8 @@ pre{margin:0;font:inherit}
 .com{color:var(--dim)}.kw{color:var(--mod)}.fn{color:var(--skill)}.str{color:var(--script)}.num{color:var(--routine)}.dir{color:var(--ink);font-weight:600}
 .k-skill{--k:var(--skill)}.k-mod{--k:var(--mod)}.k-routine{--k:var(--routine)}.k-script{--k:var(--script)}
 .kc{color:var(--k);font-weight:600}
+/* The groups of the graph: a routine, the six layers of the skills, a mod, a script. A layer color wins over the kind color. */
+.g-routine{--k:var(--routine)}.g-mod{--k:var(--mod)}.g-script{--k:var(--script)}.g-l0{--k:var(--dim)}.g-l1{--k:var(--l1)}.g-l2{--k:var(--l2)}.g-l3{--k:var(--l3)}.g-l4{--k:var(--l4)}.g-l5{--k:var(--l5)}.g-l9{--k:var(--l9)}
 
 /* The flows as code. The line number is a CSS counter. The lit line is the program counter. */
 .flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,470px),1fr));gap:.6rem}
@@ -325,7 +362,10 @@ ul.logs{list-style:none;margin:0;padding:.5rem 0}
 .graph.sel .nd.me text{opacity:1;fill:var(--k);font-weight:600}
 .graph.sel .nd.me circle{r:5.5}
 @keyframes run{to{stroke-dashoffset:-18}}
-.s-skill{stroke:var(--skill)}.s-mod{stroke:var(--mod)}.s-routine{stroke:var(--routine)}.s-script{stroke:var(--script)}
+.s-routine{stroke:var(--routine)}.s-mod{stroke:var(--mod)}.s-script{stroke:var(--script)}.s-l0{stroke:var(--dim)}.s-l1{stroke:var(--l1)}.s-l2{stroke:var(--l2)}.s-l3{stroke:var(--l3)}.s-l4{stroke:var(--l4)}.s-l5{stroke:var(--l5)}.s-l9{stroke:var(--l9)}
+/* A hint: a skill names another skill as a next step for the person. It is not a call, so it is faint and dashed. */
+.graph .ed.hint{stroke-dasharray:1 5;opacity:.16}
+.graph.sel .ed.hint.on{opacity:.55;stroke-width:1.2;stroke-dasharray:1 5;animation:none}
 .man{position:sticky;top:calc(env(safe-area-inset-top,0px) + 3.2rem);padding:.9rem 1rem 1.1rem;display:flex;flex-direction:column;gap:.1rem;min-width:0;background:var(--panel);border-radius:0 10px 10px 0}
 .man h4{font:inherit;font-weight:600;color:var(--dim);margin:.7rem 0 .1rem;letter-spacing:.06em}
 .man h4:first-child{margin-top:0}
@@ -345,6 +385,7 @@ ul.rows{list-style:none;margin:0;padding:.4rem 0}
 .item:hover{background:var(--raised)}
 .nm{color:var(--k);font-weight:600;overflow-wrap:anywhere}
 .k-skill .nm::before{content:"/";opacity:.6}
+.k-skill .item[class*="g-l"] .nm{color:var(--k)}
 .nm em{font-style:normal;font-weight:400;color:var(--dim)}
 .nm em::before{content:"@"}
 .co{color:var(--routine);font-weight:400;margin-left:1ch}
@@ -424,10 +465,15 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
 
 <section id="graph-s">
 <div class="head"><h2>How the parts connect</h2><span class="n">@@N_EDGES@@ calls</span></div>
-<p class="sub">A part calls another part when its own files name it. An arc is one call, in the color of the part that makes it. Select a part to see what it does, what it calls and what calls it. To remove parts, type a part of their name after <code>grep -v</code> (some words with a space between them remove more), or set a flag to off.</p>
+<p class="sub">The skills are in layers, and a skill calls only a skill of its own layer or of a layer below it. Thus each call goes down the list. One color marks one layer.</p>
+<div class="term" style="margin-bottom:.6rem"><div class="cmd"><b>$</b>cat ~/.claude/layers.conf</div>
+<ul class="rows">
+@@LAYERS@@
+</ul></div>
+<p class="sub">A solid arc is one call, in the color of the part that makes it. A faint dotted arc is a hint: a skill names another skill as the next step for the person. Select a part to see what it does, what it calls and what calls it. To remove parts, type a part of their name after <code>grep -v</code> (some words with a space between them remove more), or set a flag to off.</p>
 <div class="term"><label class="cmd" for="f2"><b>$</b>deps --graph | grep -v<input class="find" id="f2" type="search" placeholder="text" aria-label="Hide the parts whose name has this text"></label>
 <div class="flags" id="flags" role="group" aria-label="Kinds of part in the graph">
-<button type="button" class="k-routine" data-f="routine" aria-pressed="true">--routines</button><button type="button" class="k-skill" data-f="skill" aria-pressed="true">--skills</button><button type="button" class="k-mod" data-f="mod" aria-pressed="true">--mods</button><button type="button" class="k-script" data-f="script" aria-pressed="true">--scripts</button><button type="button" data-f="company" aria-pressed="true">--company</button>
+@@FLAGS@@<button type="button" data-f="company" aria-pressed="true">--company</button>
 <span class="com" id="gcount"></span></div>
 <div class="deps">
 <div class="scroll">
@@ -506,33 +552,34 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
   }
   tick();setInterval(tick,30000);
   // The call graph: one part is chosen. Its arcs and the parts at the other end of them are lit, and the man page says what it does.
-  var G=null,svg=document.getElementById('graph'),man=document.getElementById('man');
+  var G=null,GN=@@GNAMES@@,svg=document.getElementById('graph'),man=document.getElementById('man');
   try{G=JSON.parse(document.getElementById('gdata').textContent)}catch(x){}
   function add(tag,cls,text,to){var el=document.createElement(tag);if(cls)el.className=cls;if(text)el.textContent=text;to.appendChild(el);return el}
   function names(title,list){
     add('h4','',title,man);
     if(!list.length){add('p','nil','none',man);return}
     var box=add('div','list',null,man);
-    list.forEach(function(id){var b=add('button','k-'+G.n[id][0],id,box);b.type='button';b.addEventListener('click',function(){pick(id)})});
+    list.forEach(function(id){var b=add('button','g-'+G.n[id][0],id,box);b.type='button';b.addEventListener('click',function(){pick(id)})});
   }
   var vis={},cur=null,off={},f2=document.getElementById('f2'),flags=document.getElementById('flags'),gcount=document.getElementById('gcount'),nds=[],eds=[],y0={};
   function pick(id){
     if(!G||!svg||!G.n[id]||!vis[id])return;
     cur=id;var out=[],inn=[];
-    G.e.forEach(function(ed){if(!vis[ed[0]]||!vis[ed[1]])return;if(ed[0]===id)out.push(ed[1]);if(ed[1]===id)inn.push(ed[0])});
+    var hint=[];
+    G.e.forEach(function(ed){if(!vis[ed[0]]||!vis[ed[1]])return;if(ed[2]==='h'){if(ed[0]===id)hint.push(ed[1]);return}if(ed[0]===id)out.push(ed[1]);if(ed[1]===id)inn.push(ed[0])});
     svg.classList.add('sel');
     eds.forEach(function(p){p.classList.toggle('on',p.getAttribute('data-s')===id||p.getAttribute('data-t')===id)});
     nds.forEach(function(n){var k=n.getAttribute('data-id');n.classList.toggle('me',k===id);n.classList.toggle('on',k===id||out.indexOf(k)>=0||inn.indexOf(k)>=0)});
     man.textContent='';
-    add('h4','','NAME',man);var p=add('p','',null,man);add('b','kc k-'+G.n[id][0],id,p);add('span','com','  ('+G.n[id][0]+')',p);
+    add('h4','','NAME',man);var p=add('p','',null,man);add('b','kc g-'+G.n[id][0],id,p);add('span','com','  ('+(GN[G.n[id][0]]||G.n[id][0])+')',p);
     add('h4','','WHAT IT DOES',man);add('p','',G.n[id][1]||'No description.',man);
-    names('CALLS',out);names('CALLED BY',inn);
+    names('CALLS',out);names('CALLED BY',inn);if(hint.length)names('NAMES AS A NEXT STEP',hint);
   }
   // The part with the most calls among the parts that stay: a skill first, else any part.
   function busiest(){
     var most={},top=null,any=null;
-    G.e.forEach(function(ed){if(vis[ed[0]]&&vis[ed[1]])most[ed[0]]=(most[ed[0]]||0)+1});
-    Object.keys(most).forEach(function(k){if(!any||most[k]>most[any])any=k;if(G.n[k][0]==='skill'&&(!top||most[k]>most[top]))top=k});
+    G.e.forEach(function(ed){if(ed[2]==='c'&&vis[ed[0]]&&vis[ed[1]])most[ed[0]]=(most[ed[0]]||0)+1});
+    Object.keys(most).forEach(function(k){if(!any||most[k]>most[any])any=k;if(G.n[k][0].charAt(0)==='l'&&(!top||most[k]>most[top]))top=k});
     return top||any||Object.keys(vis)[0]||null;
   }
   // Hide the parts that the filters remove, move the others up, and draw each arc again between the new places.
@@ -547,20 +594,20 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
     eds.forEach(function(p){
       var a=vis[p.getAttribute('data-s')],b=vis[p.getAttribute('data-t')];
       if(!a||!b){p.style.display='none';return}
-      var dd=Math.abs(b-a);calls++;p.style.display='';
+      var dd=Math.abs(b-a);if(p.getAttribute('data-y')==='c')calls++;p.style.display='';
       p.setAttribute('d','M'+G.x+' '+a+' A'+Math.min(320,24+dd*.42).toFixed(0)+' '+(dd/2).toFixed(1)+' 0 0 '+(b>a?1:0)+' '+G.x+' '+b);
     });
     svg.setAttribute('viewBox','0 0 '+G.w+' '+Math.max(y,40));
     if(gcount)gcount.textContent='# '+parts+' parts, '+calls+' calls';
     if(cur&&vis[cur])pick(cur);else{var t=busiest();if(t)pick(t);else{svg.classList.remove('sel');man.textContent='';add('h4','','NAME',man);add('p','nil','No part is left. Remove a filter.',man)}}
-    try{localStorage.setItem('setup-map-graph',JSON.stringify({off:off,text:f2?f2.value:''}))}catch(x){}
+    try{localStorage.setItem('setup-map-graph2',JSON.stringify({off:off,text:f2?f2.value:''}))}catch(x){}
   }
   if(G&&svg){
     nds=[].slice.call(svg.querySelectorAll('.nd'));eds=[].slice.call(svg.querySelectorAll('.ed'));
     nds.forEach(function(n){var id=n.getAttribute('data-id');y0[id]=+n.querySelector('circle').getAttribute('cy');
       n.addEventListener('click',function(){pick(id)});n.addEventListener('mouseenter',function(){pick(id)});
       n.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pick(id)}})});
-    try{var saved=JSON.parse(localStorage.getItem('setup-map-graph')||'null');if(saved){off=saved.off||{};if(f2&&typeof saved.text==='string')f2.value=saved.text}}catch(x){off={}}
+    try{var saved=JSON.parse(localStorage.getItem('setup-map-graph2')||'null');if(saved){off=saved.off||{};if(f2&&typeof saved.text==='string')f2.value=saved.text}}catch(x){off={}}
     if(flags)[].forEach.call(flags.querySelectorAll('button'),function(b){var k=b.getAttribute('data-f');
       b.setAttribute('aria-pressed',off[k]?'false':'true');
       b.addEventListener('click',function(){off[k]=!off[k];b.setAttribute('aria-pressed',off[k]?'false':'true');layout()})});
@@ -576,7 +623,7 @@ footer{margin-top:3.4rem;color:var(--dim);font-family:var(--mono);font-size:.76r
 """
 import datetime
 for k, v in (('N_SKILLS', N_SKILLS), ('N_MODS', N_MODS), ('N_ROUT', N_ROUT), ('N_EXTRA', N_EXTRA), ('N_RULES', len(rules)), ('N_FLOWS', len(flows)),
-             ('DATE', datetime.date.today().isoformat()), ('TREE', tree_html), ('GRAPH', graph_html), ('GDATA', graph_data), ('N_EDGES', N_EDGES), ('FLOWS', flows_html), ('CRON', cron_html),
+             ('DATE', datetime.date.today().isoformat()), ('TREE', tree_html), ('GRAPH', graph_html), ('GDATA', graph_data), ('N_EDGES', N_EDGES), ('LAYERS', layers_html), ('FLAGS', flags_html), ('GNAMES', group_names), ('FLOWS', flows_html), ('CRON', cron_html),
              ('SKILLS', skills_html), ('MODS', mods_html), ('EXTRAS', extras_html), ('RULES', rules_html), ('FOOTER', footer_html)):
     page = page.replace('@@%s@@' % k, str(v))
 open(OUT, 'w', encoding='utf-8').write(page)
