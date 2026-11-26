@@ -15,7 +15,7 @@
 # <key> is "<board>:<ticket>", for example "my-app:TICKET-123". Letters, digits and . _ : - only.
 # A claim is a folder in ~/.claude/claims, made with mkdir: that call is atomic, so two sessions that claim at the
 # same moment cannot both win. A claim ends after its TTL (default 4 hours) without a heartbeat, so a session that
-# died frees its ticket by itself. Claims are local: another computer sees the ClickUp status and not this folder.
+# died frees its ticket by itself. Claims are local: another computer sees the ticket status and not this folder.
 # CLAIMS_DIR replaces the folder and CLAIMS_NOW (epoch seconds) replaces the clock, for tests.
 set -uo pipefail
 
