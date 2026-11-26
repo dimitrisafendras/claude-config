@@ -182,4 +182,21 @@ for m in "$ROOT"/mods/*/ "$ROOT"/profiles/*/mods/*/ ${PDIR:+"$PDIR"/mods/*/}; do
   else f INFO mod "claude CLI not found, cannot validate ${m#"$ROOT"/}"; fi
 done
 
+# 9. mods that do no work
+# Each mod is a belief about what Claude cannot do by itself, and a belief gets old. A mod writes its store file
+# (~/.claude/plugins/store/<mod>_<source>-<hash>.json) when it acts. A store with no write in MOD_IDLE_DAYS days
+# (default 30) is a mod to look at: remove it, or keep it and say why. SETUP_AUDIT_STORE replaces the folder.
+STORE="${SETUP_AUDIT_STORE:-$HOME/.claude/plugins/store}"
+IDLE="${MOD_IDLE_DAYS:-30}"
+if [ -d "$STORE" ]; then
+  for m in "$ROOT"/mods/*/ ${PDIR:+"$PDIR"/mods/*/}; do
+    [ -d "$m" ] || continue
+    name=$(basename "$m")
+    all=$(find "$STORE" -maxdepth 1 -type f -name "${name}_*.json" ! -name "${name}_inline-*" 2>/dev/null)
+    if [ -z "$all" ]; then f INFO mod-use "$name has no store file: the audit cannot tell if it does work"; continue; fi
+    fresh=$(find "$STORE" -maxdepth 1 -type f -name "${name}_*.json" ! -name "${name}_inline-*" -mtime "-$IDLE" 2>/dev/null)
+    [ -n "$fresh" ] || f INFO mod-use "$name wrote nothing to its store in $IDLE days: is it still necessary?"
+  done
+else f INFO mod-use "no store folder $STORE: the audit cannot tell which mods do work"; fi
+
 [ "$ERRORS" -eq 0 ] && exit 0 || exit 1

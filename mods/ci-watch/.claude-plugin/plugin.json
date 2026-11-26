@@ -1,6 +1,6 @@
 {
   "name": "ci-watch",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Watches the CI of your pull requests and starts a turn when a PR turns red, conflicts or is green to merge, so no agent sleep-polls CI. With loop=on (the default) it runs the lane loop: at most 3 fix tries per PR, merge on green under merge-policy, a watch of the deploy run of the merge commit, a staging verify turn, then one close-and-cleanup turn; at most 60 automatic turns a day, and no turn while ~/.claude/autonomy.off exists. fix_turns=off keeps the notifications and starts no turn for red CI and conflicts. With autoMerge=true (the default) it merges your own PRs by itself at green: only when the kill switch is off, the PR is yours and not a draft, CI is green and mergeStateStatus is CLEAN, no changes are requested, it is no production release and ~/.claude/merge-policy.json allows the merge; else a toast and the status line say why it holds. Other mods and the model add a PR through the tool mcp__ci-watch__watch.",
   "author": {
     "name": "claude-config"
@@ -34,6 +34,12 @@
       "title": "Auto-merge your PRs",
       "description": "true: when CI turns green, ci-watch starts the merge turn (merge-when-green steps: squash when the rule allows it, delete the branch) for your own PRs, only when every rule holds: kill switch off, your PR, not a draft, CI green, mergeStateStatus CLEAN, no requested changes, no production release, and merge-policy allows it. Else it holds and says why. false: only PRs with auto-merge asked for on them (/ci-watch auto-merge <pr> on).",
       "default": true
+    },
+    "autoMergeSkip": {
+      "type": "string",
+      "title": "Repos with no auto-merge",
+      "description": "Empty (the default): the option autoMerge applies to every repo. A list of repos, with commas or spaces between them (owner/name, or owner/* for every repo of an owner): ci-watch does not merge the PRs of these repos by itself. A PR with auto-merge asked for on it (/ci-watch auto-merge <pr> on) still merges.",
+      "default": ""
     }
   }
 }
