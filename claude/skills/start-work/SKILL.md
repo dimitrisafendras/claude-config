@@ -75,7 +75,7 @@ Print the plan as one table (`#`, item link, repo, surface, severity, size · mo
 
 Group the dispatchable rows into **lanes**: one lane per (repo, surface) pair that has rows. Backend and infra rows of the board repo form one lane.
 
-- **One lane:** start it in this session. If an environment skill for the surface is installed (for example `start-web-dev` or `start-mobile-dev`), invoke it. Else work the rows yourself, one subagent per row, and keep the PRs small. For a project other than the current one, run from that project's checkout.
+- **One lane:** give its rows to the dispatcher in this session: the project's dispatcher when a source names one, else `paralel`, with `single`. The dispatcher decides the surface and the environment of the lane; this skill does not. If no dispatcher is installed, work the rows yourself, one subagent per row, and keep the PRs small. For a project other than the current one, run from that project's checkout.
 - **Two or more lanes:** this session becomes the coordinator and starts one nested session per lane. Use the project's dispatcher when a source names one, else the `paralel` skill if it is installed. Else read `references/lanes.md` for the session brief, the memory budget and the coordination rules.
   - Lanes that change the same API or shared library: the contract change goes first, in its own PR from the coordinator.
   - Not more sessions than the memory budget allows. Queue the other lanes and start each when one ends.

@@ -19,7 +19,7 @@ The lane loop runs this skill at its merge stage, with no person. Check `bash ~/
 1. **Find the PR.** With an argument, use it. Else run `gh pr view --json number,url,headRefName` in the current repo. No PR: stop and say so. Name the step that opens one: `/ship`.
 2. **Read the state once.** Run `gh pr view <n> -R <repo> --json isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,baseRefName`.
 3. **Decide.**
-   - Draft, `mergeable` = `CONFLICTING`, `reviewDecision` = `CHANGES_REQUESTED`, or any check failed: stop. Say the reason in one line. Name the next step: `/pr-sweep` or `/paralel` to fix it.
+   - Draft, `mergeable` = `CONFLICTING`, `reviewDecision` = `CHANGES_REQUESTED`, or any check failed: stop. Say the reason in one line. Name the next step for the person (`/pr-sweep` or `/paralel` fixes it). Do not start it here.
    - Any check still running or queued: add the PR to ci-watch with the intent "merge on green": `/ci-watch add <n>`. Say that the merge runs on the green turn. Do not wait here.
    - All checks passed, not a draft, no conflict, no requested changes: go to step 4.
 4. **Check the repo rule.** Read the repo's `CLAUDE.md` and `AGENTS.md` (if present) for a merge rule. A rule that needs an admin gate, a second approval or a manual step: stop. Say which rule. Never work around it.

@@ -8,6 +8,8 @@ argument-hint: "<task, ticket id(s) or URL, or epic> [sessions=N | single] | sta
 
 A project can have its own dispatcher skill. Its extra source file in `~/.claude/start-work.d/` names it on a line `Dispatcher`. Use that skill instead: it runs this skill with the project's rules.
 
+**This skill is the only place that decides how work is done:** the lanes, the surface of each lane (web, mobile, backend, infra) and its environment. An intake skill (`start-work`) gives it rows and decides nothing more. An environment skill makes one app run and visible, then returns: it does not plan, dispatch, start sessions or merge. The calls go one way (`~/.claude/layers.conf`).
+
 Once invoked, this stays on for the session. This session is the **dispatcher**: it sizes each request, sends it to a background agent and answers the user at once. It does not do the work. It owns the branches and the merges.
 
 ## Hard rules
@@ -33,7 +35,7 @@ The user manages **one** session: this one. Lane sessions are internal. A lane n
 | Work | Mode |
 |---|---|
 | Each ticket or unique task (the default) | One nested session per task, each running `/paralel` as a lane with its own agents; this session coordinates (`references/lanes.md`) |
-| A lane whose work must be seen running (web or mobile UI) | The lane runs `start-web-dev` or `start-mobile-dev` first, then works as a lane (`references/plan-the-fan-out.md`, 3b) |
+| A lane whose work must be seen running (web or mobile UI) | This skill marks the lane `env` and names its environment skill (`start-web-dev`, `start-mobile-dev`, or the one that the project names). The lane runs it first, then works as a lane (`references/plan-the-fan-out.md`, 3b) |
 | Items on the same files, a trivial task, `single`, or no memory room | Stay in this session with agents only, or queue the session |
 
 ## Core loop

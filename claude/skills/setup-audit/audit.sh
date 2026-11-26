@@ -72,6 +72,17 @@ if [ -n "$PDIR" ] && [ -x "$PDIR/sync.sh" ]; then
   [ -f "$PDIR/sync.ref" ] && f INFO sync "follows the branch $(tr -d '[:space:]' < "$PDIR/sync.ref"), not main (delete sync.ref after that PR merges)"
 fi
 
+# The calls between the skills go one way (claude/layers.conf). The profile's skills are checked too.
+if [ -f "$ROOT/tests/skill-graph.sh" ] && command -v python3 >/dev/null; then
+  out=$(SKILL_GRAPH_PROFILE="${PDIR:-}" bash "$ROOT/tests/skill-graph.sh" 2>&1) || true
+  while IFS= read -r l; do
+    case "$l" in
+      FAIL:*) f ERROR layers "${l#FAIL: }" ;;
+      known:*) f INFO layers "${l#known: } (a known exception in layers.conf)" ;;
+    esac
+  done <<<"$out"
+fi
+
 # 1b. the core must hold nothing of a company, a person or a project (tests/core-clean.sh has the word list)
 if [ -f "$ROOT/tests/core-clean.sh" ]; then
   out=$(bash "$ROOT/tests/core-clean.sh" 2>&1) || while IFS= read -r l; do [ -n "$l" ] && f WARN core-clean "$l"; done <<<"$out"

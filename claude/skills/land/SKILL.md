@@ -16,7 +16,7 @@ Merge, then pull and install. Read each state once. Never poll.
 2. **Read each PR once.** `gh pr view <n> -R <repo> --json state,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup`.
 3. **Decide for each PR.**
    - Already `MERGED`: nothing to do, go to step 5 for it.
-   - Draft, `CONFLICTING`, `CHANGES_REQUESTED` or a failed check: stop for that PR. Say the reason in one line. Name `/pr-sweep` or `/paralel`.
+   - Draft, `CONFLICTING`, `CHANGES_REQUESTED` or a failed check: stop for that PR. Say the reason in one line, and name the skill that fixes it for the person (`/pr-sweep` or `/paralel`). Do not start it here.
    - Checks still running: add it to ci-watch (`/ci-watch add <n>`, auto-merge on). Say that ci-watch merges it and starts a turn. Do not wait here.
    - All green and `CLEAN`: run the steps of `merge-when-green` (rule check, then `gh pr merge <n> -R <repo> --squash --delete-branch`). The merge policy mod may refuse: report its reason and stop for that PR.
 4. **Wait without polling.** If a PR still runs, end the turn with one line: which PRs wait, and that ci-watch starts the next turn. On that turn, read the state once and go on from step 3.
