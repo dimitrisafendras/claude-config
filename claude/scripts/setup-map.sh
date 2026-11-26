@@ -179,7 +179,8 @@ for n, d in extras:
 sources = {}
 for root in (CORE + '/claude/skills', PROF + '/skills'):
     for d in sorted(glob.glob(root + '/*/')):
-        sources[os.path.basename(d.rstrip('/'))] = read_all(glob.glob(d + '**/*.md', recursive=True))
+        # normpath: on Windows the folder from glob ends with a backslash, and then basename gives an empty name.
+        sources[os.path.basename(os.path.normpath(d))] = read_all(glob.glob(os.path.join(d, '**', '*.md'), recursive=True))
 for q in glob.glob(CORE + '/routines/*.md'):
     f = front(q); n = f.get('name', os.path.basename(q)[:-3])
     if kind_of.get(n) == 'routine': sources[n] = read_all([q]) + "\n" + " ".join('`%s`' % x.strip() for x in f.get('skills', '').strip('[]').split(',') if x.strip())
