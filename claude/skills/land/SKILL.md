@@ -18,7 +18,7 @@ Merge, then pull and install. Read each state once. Never poll.
    - Already `MERGED`: nothing to do, go to step 5 for it.
    - Draft, `CONFLICTING`, `CHANGES_REQUESTED` or a failed check: stop for that PR. Say the reason in one line, and name the skill that fixes it for the person (`/pr-sweep` or `/paralel`). Do not start it here.
    - Checks still running: add it to ci-watch (`/ci-watch add <n>`, auto-merge on). Say that ci-watch merges it and starts a turn. Do not wait here.
-   - All green and `CLEAN`: run the steps of `merge-when-green` (rule check, then `gh pr merge <n> -R <repo> --squash --delete-branch`). The merge policy mod may refuse: report its reason and stop for that PR.
+   - All green and `CLEAN`: run the steps of `merge-when-green` (rule check, then `gh pr merge <n> -R <repo> --squash --delete-branch` as one Bash call that holds only this command: no pipe, no `;` or `&&` after it, no redirect such as `2>&1`. merge-policy approves only this plain shape; any other shape makes it ask a person. Read the result in a second call). The merge policy mod may refuse: report its reason and stop for that PR.
 4. **Wait without polling.** If a PR still runs, end the turn with one line: which PRs wait, and that ci-watch starts the next turn. On that turn, read the state once and go on from step 3.
 5. **Pull and install, only when every PR is merged.** The main checkout is the folder in `~/.claude/claude-config.repo`.
    - `git -C <main> status --porcelain` must be empty. If not, stop and say which files.
