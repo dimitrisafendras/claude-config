@@ -53,6 +53,8 @@ type $T = EngineInterface
 let fixTurns = true
 let loopOn = true
 let autoMergeOn = true
+/** Repos that the option autoMerge leaves alone (option autoMergeSkip). `owner/*` is every repo of an owner. */
+let autoMergeSkip: string[] = []
 /** What the model is told the watch does, for the option's value. */
 const effect = () =>
   fixTurns
@@ -97,6 +99,10 @@ type Entry = {
   checkedAt?: number
   /** Automatic fix turns started for this PR (red CI, conflict, failed deploy), at most MAX_TRIES. */
   tries?: number
+  /** The failed checks at the last fix turn (sorted names), to see a try that changed nothing. */
+  failedNames?: string
+  /** How many fix turns in a row started with the same failed checks as the turn before. */
+  same?: number
   /** True after the last turn (stop, decision record): no more fix turns. */
   gaveUp?: boolean
   /** True after merge-policy or a repo rule refused the merge. */
@@ -561,8 +567,35 @@ const nextNote = (text: string) => ` Write \`next\` on the ticket row: "${text.s
 const needsYou = (e: Pick<Entry, 'repo' | 'number' | 'title'>, rec: string, next: string) =>
   ` Write this decision record (one JSON object) in the ticket and in your report: ${rec} Mark the ticket needs-you.${nextNote(next)}`
 
+/** The lessons file of a repo: one local log of CI failures and their fixes, read before each fix try. */
+export const lessonsFile = (repo: string) => `~/.claude/ci-lessons/${repo.replace(/[^\w.-]/g, '-')}.md`
+
+/** What each fix try does with the lessons file, and how a later try starts with a clean context. */
+function lessonsText(e: Entry, n: number): string {
+  const file = lessonsFile(e.repo)
+  const first =
+    ` Before the fix: read ${file} when it exists, then read the failed log, and only then name a cause.` +
+    ` After the push: add one entry to ${file} (date, PR, symptom, cause, fix; make the folder when it is not there).`
+  if (n < 2) return first
+  return (
+    first +
+    ` The fix before this one did not work: do this try in a fresh subagent (the Agent tool, not a fork).` +
+    ` Give it the failed log, the lessons file and one line for each earlier try with why it failed. Do not give it this conversation.`
+  )
+}
+
 function fixText(e: Entry, base: string, n: number): string {
-  return `${base} This is fix try ${n} of ${MAX_TRIES} for ${label(e)}.${nextNote(`CI watch: fix try ${n} of ${MAX_TRIES}`)}`
+  return `${base} This is fix try ${n} of ${MAX_TRIES} for ${label(e)}.${lessonsText(e, n)}${nextNote(`CI watch: fix try ${n} of ${MAX_TRIES}`)}`
+}
+
+/** The last turn when two fix tries in a row left the same checks red: more tries would change nothing. */
+function stuckText(e: Entry, names: string, done: number, now: number): string {
+  const rec = record(e, 'fix-tries', `${label(e)} has the same failed checks (${names}) after ${done} automatic fix tries. How to go on?`, ['a person fixes it', 'close the PR'], now)
+  return (
+    `ci-watch: ${label(e)} is red with the same failed checks (${names}) after ${done} automatic fix tries. The tries make no progress. Stop fixing it: make no more fix commits.` +
+    ` Add one entry to ${lessonsFile(e.repo)}: what the tries did and why they failed.` +
+    needsYou(e, rec, `waits for a decision: no progress after ${done} fix tries`)
+  )
 }
 
 function stopText(e: Entry, why: string, now: number): string {
@@ -667,7 +700,12 @@ async function loadPolicy($: $T): Promise<PolicyLoad> {
 }
 
 /** True when ci-watch weighs an auto-merge for this PR at green. */
-const isCandidate = (e: Entry) => !e.mergeRefused && (e.autoMerge === true || (autoMergeOn && e.autoMerge !== false))
+const isSkipped = (repo: string) => {
+  const r = repo.toLowerCase()
+  return autoMergeSkip.some(s => (s.endsWith('/*') ? r.startsWith(s.slice(0, -1)) : r === s))
+}
+const isCandidate = (e: Entry) =>
+  !e.mergeRefused && (e.autoMerge === true || (autoMergeOn && e.autoMerge !== false && !isSkipped(e.repo)))
 
 /** The green step: merge turn, hold turn, or only a toast. False when a turn was held (kill switch, cap). */
 async function greenStep($: $T, e: Entry, pr: PrView, now: number): Promise<boolean> {
@@ -705,16 +743,19 @@ async function greenStep($: $T, e: Entry, pr: PrView, now: number): Promise<bool
 // ---------- polling ----------
 
 /** A fix turn of the loop: counts the try, or after MAX_TRIES starts the last turn. False when the gate held it. */
-async function fixTurn($: $T, e: Entry, base: string, why: string): Promise<boolean> {
+async function fixTurn($: $T, e: Entry, base: string, why: string, names?: string): Promise<boolean> {
   if (e.gaveUp) {
     $.ui.toast(`${label(e)} is ${why}; ci-watch stopped fixing it after ${MAX_TRIES} tries`)
     return true
   }
   const n = (e.tries ?? 0) + 1
   const now = await $.clock.now()
-  const text = n <= MAX_TRIES ? fixText(e, base, n) : stopText(e, why, now)
+  // The same checks red at two fix turns in a row after the first: the tries make no progress.
+  const same = names !== undefined && names !== '' && names === e.failedNames ? (e.same ?? 0) + 1 : 0
+  const isStuck = same >= 2 && n <= MAX_TRIES
+  const text = isStuck ? stuckText(e, names ?? '', n - 1, now) : n <= MAX_TRIES ? fixText(e, base, n) : stopText(e, why, now)
   if (!(await startTurn($, text))) return false
-  await save($, { ...e, tries: Math.min(n, MAX_TRIES), gaveUp: n > MAX_TRIES })
+  await save($, { ...e, tries: isStuck ? n - 1 : Math.min(n, MAX_TRIES), gaveUp: n > MAX_TRIES || isStuck, failedNames: names, same })
   return true
 }
 
@@ -816,7 +857,7 @@ async function pollOne($: $T, e: Entry): Promise<boolean> {
       verdict === 'red'
         ? failedText(e, failed)
         : `ci-watch: ${name} has merge conflicts with ${base}. Fetch origin, rebase onto (or merge) origin/${base}, resolve the conflicts, run the tests, and push.`
-    const isStarted = loopOn ? await fixTurn($, next, text, verdict === 'red' ? 'red' : 'in conflict') : await startTurn($, text)
+    const isStarted = loopOn ? await fixTurn($, next, text, verdict === 'red' ? 'red' : 'in conflict', verdict === 'red' ? failed.map(f => f.name).sort().join(', ') : undefined) : await startTurn($, text)
     if (!isStarted) await held()
   } else if (verdict === 'green') {
     if (!(await greenStep($, next, pr, now))) {
@@ -862,7 +903,7 @@ async function runCommand($: $T, args: string): Promise<string> {
       ? `loop on: ${day.count} of ${DAY_CAP} automatic turns today${(await isOff($)) ? '; kill switch on (~/.claude/autonomy.off): no turns' : ''}.`
       : 'loop off.'
     const mergeLine = autoMergeOn
-      ? 'auto-merge on: ci-watch merges your own green, clean PRs under merge-policy (option autoMerge).'
+      ? `auto-merge on: ci-watch merges your own green, clean PRs under merge-policy (option autoMerge).${autoMergeSkip.length ? ` Not in: ${autoMergeSkip.join(', ')} (option autoMergeSkip).` : ''}`
       : 'auto-merge off: only PRs with auto-merge on (option autoMerge).'
     const rows = list.map(e => {
       const stage = e.phase === 'deploy' ? 'merged, deploy watched' : e.phase === 'verify' ? 'merged, verify turn' : e.phase === 'close' ? 'verified, close turn next' : e.phase === 'handed' ? 'merged, fix in a follow-up PR' : (e.verdict ?? 'not checked yet')
@@ -943,6 +984,7 @@ export const register: Register = (on, options) => {
   fixTurns = options.fix_turns !== 'off'
   loopOn = options.loop !== 'off'
   autoMergeOn = options.autoMerge !== false && options.autoMerge !== 'false'
+  autoMergeSkip = String(options.autoMergeSkip ?? '').toLowerCase().split(/[\s,]+/).filter(Boolean)
 
   on('session.start', async ($, e, next) => {
     try {

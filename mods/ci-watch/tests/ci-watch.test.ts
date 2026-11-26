@@ -309,8 +309,12 @@ test('loop: fix tries count to 3, then one last turn writes a decision record', 
   w.gh.pr = CONFLICT
   await check($, w)
   expect(w.prompts.length).toBe(3)
-  expect(w.prompts[0]).toContain('This is fix try 1 of 3 for o/r#5. Write `next` on the ticket row: "CI watch: fix try 1 of 3".')
+  expect(w.prompts[0]).toContain('This is fix try 1 of 3 for o/r#5. Before the fix: read ~/.claude/ci-lessons/o-r.md when it exists, then read the failed log')
+  expect(w.prompts[0]).toContain('add one entry to ~/.claude/ci-lessons/o-r.md')
+  expect(w.prompts[0]).toContain('Write `next` on the ticket row: "CI watch: fix try 1 of 3".')
+  expect(w.prompts[0]).not.toContain('fresh subagent')
   expect(w.prompts[1]).toContain('fix try 2 of 3')
+  expect(w.prompts[1]).toContain('do this try in a fresh subagent (the Agent tool, not a fork)')
   expect(w.prompts[2]).toContain('has merge conflicts with main')
   expect(w.prompts[2]).toContain('fix try 3 of 3')
   expect(await list($)).toContain('o/r#5 conflict (fix try 3 of 3)')
@@ -481,8 +485,9 @@ test('loop: a failed deploy after 3 fix tries writes a decision record', async (
   const w = world(on)
   await $.session.start(START)
   await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
-  for (const id of [777, 778, 779]) {
-    w.gh.pr = redRun(id)
+  // A conflict between the two red runs: the failed checks are not the same two times in a row, so 3 tries count.
+  for (const pr of [redRun(777), CONFLICT, redRun(779)]) {
+    w.gh.pr = pr
     await check($, w)
   }
   w.gh.pr = MERGED
@@ -522,7 +527,46 @@ test('loop off: a merged PR leaves the list, as before', { options: { loop: 'off
   expect(w.gh.calls.some(c => c[1] === 'run')).toBe(false)
 })
 
+test('loop: the same failed checks after two fix tries stop the tries early', async ($, on) => {
+  const w = world(on)
+  w.gh.pr = redRun(777)
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  w.gh.pr = redRun(778)
+  await check($, w)
+  w.gh.pr = redRun(779)
+  await check($, w)
+  expect(w.prompts.length).toBe(3)
+  expect(w.prompts[1]).toContain('fix try 2 of 3')
+  expect(w.prompts[2]).toContain('is red with the same failed checks (test) after 2 automatic fix tries')
+  expect(w.prompts[2]).toContain('Stop fixing it: make no more fix commits.')
+  expect(w.prompts[2]).toContain('"default":"a person fixes it"')
+  expect(w.prompts[2]).not.toContain('fix try 3 of 3')
+
+  // No more fix turns after the stop.
+  w.gh.pr = redRun(780)
+  await check($, w)
+  expect(w.prompts.length).toBe(3)
+})
+
 // ---------- auto-merge of your own PRs (option autoMerge, default true) ----------
+
+test('autoMergeSkip: a repo on the list gets no merge turn, and one PR can still ask for it', { options: { autoMergeSkip: 'x/y, O/*' } }, async ($, on) => {
+  const w = world(on)
+  w.gh.pr = GREEN
+  await $.session.start(START)
+  await $.command.run({ command: 'ci-watch', args: 'add o/r#5', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(0)
+  expect(w.toasts).toContain('o/r#5 is green')
+  expect(await list($)).toContain('Not in: x/y, o/* (option autoMergeSkip).')
+
+  await $.command.run({ command: 'ci-watch', args: 'auto-merge o/r#5 on', ...RUN })
+  await check($, w)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('`gh pr merge 5 -R o/r --squash --delete-branch`')
+})
 
 test('autoMerge: your green, clean PR starts the merge turn with no ask, a toast and a status line', async ($, on) => {
   const w = world(on)
